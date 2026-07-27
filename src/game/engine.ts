@@ -1,5 +1,3 @@
-"use client";
-
 import {
   BOSS_TANK_RADIUS,
   findMissionSpawnOverlaps,

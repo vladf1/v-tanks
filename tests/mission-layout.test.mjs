@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   findMissionSpawnOverlaps,
   MISSIONS,
-} from "../app/game/levels.ts";
+} from "../src/game/levels.ts";
 
 test("every mission starts tanks clear of walls", () => {
   const overlaps = MISSIONS.flatMap((mission) => (

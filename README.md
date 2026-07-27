@@ -25,7 +25,6 @@ npm run dev
 Quality checks:
 
 ```bash
-npm run lint
 npm test
-./node_modules/.bin/tsc --noEmit
+npm run build
 ```

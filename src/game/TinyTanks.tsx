@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TankGame, type GamePhase, type GameSnapshot } from "./engine";
 import { MISSIONS } from "./levels";
