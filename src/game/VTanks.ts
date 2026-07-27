@@ -1,5 +1,6 @@
 import { TankGame, type GamePhase, type GameSnapshot } from "./engine";
 import { MISSIONS } from "./levels";
+import gameShell from "./v-tanks.html?raw";
 
 const INITIAL_SNAPSHOT: GameSnapshot = {
   phase: "menu",
@@ -50,181 +51,13 @@ function missionCards(): string {
   `).join("");
 }
 
-function gameShell(): string {
-  return `
-    <main class="game-shell phase-menu">
-      <canvas class="game-canvas" aria-label="V/Tanks tactical arena"></canvas>
-
-      <header class="game-chrome">
-        <button class="brand-lockup" data-action="menu" aria-label="Return to mission select">
-          <span class="brand-mark"><i></i>V</span>
-          <span>
-            <strong>V/TANKS</strong>
-            <small>TACTICAL ARCADE</small>
-          </span>
-        </button>
-        <div class="top-readout" data-playing-chrome hidden aria-live="polite">
-          <div>
-            <span>MISSION</span>
-            <strong data-current-mission></strong>
-          </div>
-          <div>
-            <span>TARGETS</span>
-            <strong data-targets></strong>
-          </div>
-          <div>
-            <span>TIME</span>
-            <strong data-time></strong>
-          </div>
-        </div>
-        <div class="chrome-actions">
-          <button class="icon-button" data-action="sound"></button>
-          <button class="chrome-button" data-action="pause" hidden>PAUSE</button>
-        </div>
-      </header>
-
-      <section class="combat-status combat-status-left" data-combat hidden aria-label="Hull status">
-        <span class="status-label">HULL</span>
-        <div class="armor-pips"><i></i><i></i><i></i></div>
-      </section>
-      <section class="combat-status combat-status-right" data-combat hidden aria-label="Dash charge">
-        <span class="status-label">DASH / SHIFT</span>
-        <div class="dash-track"><i data-dash-charge></i></div>
-      </section>
-      <section class="boss-readout" data-boss hidden>
-        <span>RED CORE</span>
-        <div><i data-boss-health></i></div>
-      </section>
-      <div class="control-strip" data-combat hidden>
-        <span><kbd>WASD</kbd> MOVE</span>
-        <span><kbd>MOUSE</kbd> AIM</span>
-        <span><kbd>LMB</kbd> FIRE</span>
-        <span><kbd>SHIFT</kbd> DASH</span>
-        <span><kbd>R</kbd> RESTART</span>
-      </div>
-
-      <section class="menu-layout" data-screen="menu">
-        <div class="hero-copy">
-          <div class="eyebrow"><span></span> SOLO TACTICAL PROGRAM</div>
-          <h1><span>V/</span>TANKS</h1>
-          <p class="hero-lede">
-            Tiny machines. Sharp angles. Clear the arena before the arena clears you.
-          </p>
-          <div class="feature-line">
-            <span>01</span>
-            <p><strong>MOVE FAST</strong> — break sightlines and force bad shots.</p>
-          </div>
-          <div class="feature-line">
-            <span>02</span>
-            <p><strong>USE THE WALLS</strong> — every shell carries one ricochet.</p>
-          </div>
-          <div class="feature-line">
-            <span>03</span>
-            <p><strong>READ THE ROOM</strong> — each enemy has a different rhythm.</p>
-          </div>
-          <div class="desktop-tag">DESKTOP ONLY / KEYBOARD + MOUSE</div>
-        </div>
-
-        <div class="campaign-panel">
-          <div class="panel-heading">
-            <div>
-              <span>CAMPAIGN</span>
-              <h2>Select operation</h2>
-            </div>
-            <div class="campaign-progress">
-              <span data-campaign-progress></span><small>/06</small>
-            </div>
-          </div>
-          <div class="mission-grid">${missionCards()}</div>
-          <div class="mission-brief">
-            <div>
-              <span>MISSION <span data-selected-number></span></span>
-              <h3 data-selected-name></h3>
-              <p data-selected-briefing></p>
-            </div>
-            <dl>
-              <div><dt>HOSTILES</dt><dd data-selected-hostiles></dd></div>
-              <div><dt>PAR</dt><dd data-selected-par></dd></div>
-              <div><dt>THREAT</dt><dd data-selected-threat></dd></div>
-            </dl>
-          </div>
-          <button class="primary-button" data-action="deploy">
-            <span>DEPLOY</span>
-            <i>→</i>
-          </button>
-        </div>
-      </section>
-
-      <section class="overlay-screen" data-screen="paused" hidden>
-        <div class="overlay-card">
-          <div class="overlay-eyebrow"><span></span><span data-paused-eyebrow></span><span></span></div>
-          <h2>SYSTEM PAUSED</h2>
-          <p>Combat clock suspended. Re-enter the arena when you're ready.</p>
-          <button class="primary-button" data-action="resume">
-            <span>RESUME</span><i>→</i>
-          </button>
-          <div class="overlay-actions">
-            <button data-action="restart">RESTART</button>
-            <button data-action="menu">MISSION SELECT</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="overlay-screen" data-screen="victory" hidden>
-        <div class="overlay-card">
-          <div class="overlay-eyebrow"><span></span>ARENA SECURED<span></span></div>
-          <h2 data-victory-title></h2>
-          <p><span data-victory-mission></span> cleared. Combat telemetry has been recorded.</p>
-          <div class="result-grid">
-            <div><span>TIME</span><strong data-result-time></strong></div>
-            <div><span>PAR</span><strong data-result-par></strong></div>
-            <div><span>ACCURACY</span><strong data-result-accuracy></strong></div>
-            <div><span>HULL</span><strong data-result-hull></strong></div>
-          </div>
-          <button class="primary-button" data-action="next">
-            <span>NEXT MISSION</span><i>→</i>
-          </button>
-          <button class="primary-button" data-action="menu" data-campaign-complete hidden>
-            <span>CAMPAIGN COMPLETE</span><i>✓</i>
-          </button>
-          <div class="overlay-actions">
-            <button data-action="replay">REPLAY</button>
-            <button data-action="menu">MISSION SELECT</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="overlay-screen danger" data-screen="defeat" hidden>
-        <div class="overlay-card">
-          <div class="overlay-eyebrow"><span></span>SIGNAL LOST<span></span></div>
-          <h2>HULL BREACHED</h2>
-          <p data-defeat-message></p>
-          <button class="primary-button danger-button" data-action="redeploy">
-            <span>REDEPLOY</span><i>↻</i>
-          </button>
-          <div class="overlay-actions">
-            <button data-action="menu">MISSION SELECT</button>
-          </div>
-        </div>
-      </section>
-
-      <div class="desktop-blocker">
-        <div class="blocker-mark">V</div>
-        <span>DESKTOP SYSTEM REQUIRED</span>
-        <h1>V/TANKS needs a wider battlefield.</h1>
-        <p>Open this game on a desktop or laptop with a keyboard and mouse.</p>
-      </div>
-    </main>
-  `;
-}
-
 function requiredElement<T extends Element>(root: ParentNode, selector: string): T {
   const element = root.querySelector<T>(selector);
   if (!element) throw new Error(`Missing UI element: ${selector}`);
   return element;
 }
 
-export class TinyTanks {
+export class VTanks {
   private readonly shell: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly game: TankGame;
@@ -235,7 +68,8 @@ export class TinyTanks {
   private soundEnabled = true;
 
   constructor(private readonly root: HTMLElement) {
-    root.innerHTML = gameShell();
+    root.innerHTML = gameShell;
+    requiredElement(root, ".mission-grid").innerHTML = missionCards();
     this.shell = requiredElement(root, ".game-shell");
     this.canvas = requiredElement(root, ".game-canvas");
     root.addEventListener("click", this.onClick);
