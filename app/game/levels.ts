@@ -29,6 +29,38 @@ export interface Mission {
 
 export const WORLD_WIDTH = 960;
 export const WORLD_HEIGHT = 600;
+export const STANDARD_TANK_RADIUS = 15;
+export const BOSS_TANK_RADIUS = 25;
+export const TANK_WALL_PADDING = 2;
+
+export interface SpawnOverlap {
+  unit: string;
+  wallIndex: number;
+}
+
+function isPointInExpandedWall(point: Point, wall: Wall, expansion: number): boolean {
+  return point.x >= wall.x - expansion
+    && point.x <= wall.x + wall.width + expansion
+    && point.y >= wall.y - expansion
+    && point.y <= wall.y + wall.height + expansion;
+}
+
+export function findMissionSpawnOverlaps(mission: Mission): SpawnOverlap[] {
+  const units = [
+    { label: "player", radius: STANDARD_TANK_RADIUS, point: mission.player },
+    ...mission.enemies.map((enemy, index) => ({
+      label: `enemy ${index + 1}`,
+      radius: enemy.kind === "boss" ? BOSS_TANK_RADIUS : STANDARD_TANK_RADIUS,
+      point: enemy,
+    })),
+  ];
+
+  return units.flatMap((unit) => mission.walls.flatMap((wall, wallIndex) => (
+    isPointInExpandedWall(unit.point, wall, unit.radius + TANK_WALL_PADDING)
+      ? [{ unit: unit.label, wallIndex }]
+      : []
+  )));
+}
 
 export const MISSIONS: Mission[] = [
   {
@@ -84,7 +116,7 @@ export const MISSIONS: Mission[] = [
       { kind: "sniper", x: 845, y: 500 },
       { kind: "guard", x: 530, y: 300 },
       { kind: "scout", x: 700, y: 200 },
-      { kind: "scout", x: 700, y: 400 },
+      { kind: "scout", x: 700, y: 350 },
       { kind: "guard", x: 260, y: 120 },
     ],
     walls: [
@@ -107,8 +139,8 @@ export const MISSIONS: Mission[] = [
       { kind: "guard", x: 315, y: 478 },
       { kind: "sniper", x: 510, y: 110 },
       { kind: "sniper", x: 510, y: 490 },
-      { kind: "scout", x: 690, y: 205 },
-      { kind: "scout", x: 690, y: 395 },
+      { kind: "scout", x: 720, y: 205 },
+      { kind: "scout", x: 720, y: 395 },
       { kind: "guard", x: 838, y: 160 },
       { kind: "guard", x: 838, y: 440 },
     ],
@@ -138,8 +170,8 @@ export const MISSIONS: Mission[] = [
       { kind: "guard", x: 710, y: 300 },
       { kind: "scout", x: 480, y: 105 },
       { kind: "scout", x: 480, y: 495 },
-      { kind: "scout", x: 315, y: 165 },
-      { kind: "scout", x: 645, y: 435 },
+      { kind: "scout", x: 315, y: 135 },
+      { kind: "scout", x: 645, y: 465 },
     ],
     walls: [
       { x: 178, y: 175, width: 155, height: 26 },
@@ -163,10 +195,10 @@ export const MISSIONS: Mission[] = [
       { kind: "boss", x: 770, y: 300 },
       { kind: "sniper", x: 810, y: 105 },
       { kind: "sniper", x: 810, y: 495 },
-      { kind: "guard", x: 555, y: 140 },
-      { kind: "guard", x: 555, y: 460 },
-      { kind: "scout", x: 420, y: 220 },
-      { kind: "scout", x: 420, y: 380 },
+      { kind: "guard", x: 585, y: 140 },
+      { kind: "guard", x: 585, y: 460 },
+      { kind: "scout", x: 420, y: 195 },
+      { kind: "scout", x: 420, y: 405 },
     ],
     walls: [
       { x: 210, y: 92, width: 30, height: 166 },

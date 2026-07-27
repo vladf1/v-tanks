@@ -1,7 +1,11 @@
 "use client";
 
 import {
+  BOSS_TANK_RADIUS,
+  findMissionSpawnOverlaps,
   MISSIONS,
+  STANDARD_TANK_RADIUS,
+  TANK_WALL_PADDING,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   type EnemyKind,
@@ -62,8 +66,6 @@ interface Particle extends Point {
 }
 
 const PLAYER_SPEED = 184;
-const PLAYER_RADIUS = 15;
-const ENEMY_RADIUS = 15;
 const TANK_GUTTER = 24;
 const TAU = Math.PI * 2;
 const PLAYER_COLOR = "#9dffd7";
@@ -264,6 +266,13 @@ export class TankGame {
   startMission(index: number): void {
     this.missionIndex = clamp(index, 0, MISSIONS.length - 1);
     this.mission = MISSIONS[this.missionIndex];
+    const spawnOverlaps = findMissionSpawnOverlaps(this.mission);
+    if (spawnOverlaps.length > 0) {
+      const first = spawnOverlaps[0];
+      throw new Error(
+        `Mission ${this.mission.number} ${first.unit} overlaps wall ${first.wallIndex + 1}.`,
+      );
+    }
     this.player = this.createPlayer(this.mission.player);
     this.enemies = this.mission.enemies.map((spawn, id) => {
       const maxHp = spawn.kind === "boss" ? 7 : 1;
@@ -272,7 +281,7 @@ export class TankGame {
         kind: spawn.kind,
         x: spawn.x,
         y: spawn.y,
-        radius: spawn.kind === "boss" ? 25 : ENEMY_RADIUS,
+        radius: spawn.kind === "boss" ? BOSS_TANK_RADIUS : STANDARD_TANK_RADIUS,
         hullAngle: Math.PI,
         turretAngle: Math.PI,
         hp: maxHp,
@@ -317,7 +326,7 @@ export class TankGame {
       kind: "player",
       x: position.x,
       y: position.y,
-      radius: PLAYER_RADIUS,
+      radius: STANDARD_TANK_RADIUS,
       hullAngle: 0,
       turretAngle: 0,
       hp: 3,
@@ -506,7 +515,9 @@ export class TankGame {
   }
 
   private collidesWithWalls(tank: Tank): boolean {
-    return this.mission.walls.some((wall) => pointInExpandedWall(tank, wall, tank.radius + 2));
+    return this.mission.walls.some((wall) => (
+      pointInExpandedWall(tank, wall, tank.radius + TANK_WALL_PADDING)
+    ));
   }
 
   private tryPlayerShoot(): void {
