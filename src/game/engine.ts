@@ -911,54 +911,309 @@ export class TankGame {
     context.translate(tank.x, tank.y);
     context.rotate(tank.hullAngle);
     context.scale(scale, scale);
-    context.fillStyle = "#050908";
-    context.strokeStyle = color;
-    context.lineWidth = 2;
-    context.fillRect(-15, -12, 30, 24);
-    context.strokeRect(-15, -12, 30, 24);
-    context.strokeStyle = "rgba(255,255,255,0.7)";
-    context.lineWidth = 2.4;
-    context.beginPath();
-    context.moveTo(-12, -15);
-    context.lineTo(11, -15);
-    context.moveTo(-12, 15);
-    context.lineTo(11, 15);
-    context.stroke();
-    context.strokeStyle = "rgba(157,255,215,0.2)";
-    context.lineWidth = 1;
-    for (let x = -10; x <= 10; x += 7) {
-      context.beginPath();
-      context.moveTo(x, -17);
-      context.lineTo(x, -13);
-      context.moveTo(x, 13);
-      context.lineTo(x, 17);
-      context.stroke();
-    }
+    this.drawTankHull(context, tank.kind, color, accent);
     context.restore();
 
     context.save();
     context.translate(tank.x, tank.y);
     context.rotate(tank.turretAngle);
     context.scale(scale, scale);
-    context.strokeStyle = "#ffffff";
-    context.lineWidth = tank.kind === "boss" ? 3 : 2.5;
-    context.lineCap = "butt";
-    context.beginPath();
-    context.moveTo(0, 0);
-    context.lineTo(tank.kind === "boss" ? 27 : 24, 0);
-    context.stroke();
+    this.drawTankTurret(context, tank.kind, color, accent);
+    context.restore();
+  }
+
+  private drawTankHull(
+    context: CanvasRenderingContext2D,
+    kind: Tank["kind"],
+    color: string,
+    accent: string,
+  ): void {
+    const isAbrams = kind === "player";
+    const isType99 = kind === "boss";
+    const halfLength = isAbrams ? 17 : isType99 ? 17.5 : kind === "scout" ? 16 : 15.5;
+    const trackY = isAbrams || isType99 ? 14 : 13;
+
+    context.fillStyle = "#020504";
+    context.strokeStyle = "rgba(255,255,255,0.58)";
+    context.lineWidth = 1.15;
+    for (const side of [-1, 1]) {
+      const outer = trackY * side;
+      const inner = (trackY - 4) * side;
+      context.beginPath();
+      context.moveTo(-halfLength + 2, outer);
+      context.lineTo(halfLength - 2, outer);
+      context.lineTo(halfLength, outer - side * 2);
+      context.lineTo(halfLength, inner + side);
+      context.lineTo(-halfLength, inner + side);
+      context.lineTo(-halfLength, outer - side * 2);
+      context.closePath();
+      context.fill();
+      context.stroke();
+    }
+
+    context.strokeStyle = "rgba(157,255,215,0.24)";
+    context.lineWidth = 0.8;
+    for (let x = -12; x <= 12; x += 6) {
+      context.beginPath();
+      context.moveTo(x, -trackY);
+      context.lineTo(x, -trackY + 4);
+      context.moveTo(x, trackY - 4);
+      context.lineTo(x, trackY);
+      context.stroke();
+    }
+
     context.fillStyle = "#050908";
     context.strokeStyle = color;
-    context.lineWidth = 2;
+    context.lineWidth = 1.8;
     context.beginPath();
-    context.arc(0, 0, 9, 0, TAU);
+    if (isAbrams) {
+      context.moveTo(-16, -10);
+      context.lineTo(10, -10);
+      context.lineTo(17, -6.5);
+      context.lineTo(17, 6.5);
+      context.lineTo(10, 10);
+      context.lineTo(-16, 10);
+    } else if (isType99) {
+      context.moveTo(-16.5, -10.5);
+      context.lineTo(9, -10.5);
+      context.lineTo(17.5, -5.5);
+      context.lineTo(17.5, 5.5);
+      context.lineTo(9, 10.5);
+      context.lineTo(-16.5, 10.5);
+    } else {
+      context.moveTo(-15, -9.5);
+      context.lineTo(9.5, -9.5);
+      context.lineTo(15.5, -5.5);
+      context.lineTo(15.5, 5.5);
+      context.lineTo(9.5, 9.5);
+      context.lineTo(-15, 9.5);
+    }
+    context.closePath();
     context.fill();
     context.stroke();
-    context.fillStyle = accent;
+
+    context.lineWidth = 0.9;
+    if (isAbrams) {
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      for (let x = -14; x <= -8; x += 3) {
+        context.beginPath();
+        context.moveTo(x, -8);
+        context.lineTo(x, 8);
+        context.stroke();
+      }
+      context.strokeStyle = color;
+      context.beginPath();
+      context.moveTo(8, -8.5);
+      context.lineTo(15, 0);
+      context.lineTo(8, 8.5);
+      context.stroke();
+      context.fillStyle = accent;
+      context.fillRect(12.5, -6.5, 2, 2);
+      context.fillRect(12.5, 4.5, 2, 2);
+    } else if (kind === "scout") {
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      context.strokeRect(-14, -7.5, 6, 15);
+      for (let x = -12; x <= -8; x += 2) {
+        context.beginPath();
+        context.moveTo(x, -7);
+        context.lineTo(x, 7);
+        context.stroke();
+      }
+      context.strokeStyle = color;
+      context.beginPath();
+      context.moveTo(9, -8);
+      context.lineTo(14, -4);
+      context.moveTo(9, 8);
+      context.lineTo(14, 4);
+      context.stroke();
+    } else if (kind === "guard") {
+      context.strokeStyle = "rgba(255,255,255,0.28)";
+      context.strokeRect(-14, -7.5, 5.5, 15);
+      context.beginPath();
+      context.moveTo(-12, -6);
+      context.lineTo(-9.5, -3);
+      context.moveTo(-12, 6);
+      context.lineTo(-9.5, 3);
+      context.stroke();
+      context.strokeStyle = color;
+      context.beginPath();
+      context.moveTo(8, -8);
+      context.lineTo(14.5, 0);
+      context.lineTo(8, 8);
+      context.stroke();
+    } else {
+      context.strokeStyle = color;
+      for (const y of [-6, -2, 2, 6]) {
+        context.strokeRect(8.5, y - 1.2, 5, 2.4);
+      }
+      context.strokeStyle = "rgba(255,255,255,0.32)";
+      for (let x = -14; x <= -9; x += 2.5) {
+        context.beginPath();
+        context.moveTo(x, -7.5);
+        context.lineTo(x, 7.5);
+        context.stroke();
+      }
+      if (isType99) {
+        context.fillStyle = accent;
+        context.fillRect(12, -7.5, 2, 2);
+        context.fillRect(12, 5.5, 2, 2);
+      }
+    }
+  }
+
+  private drawTankTurret(
+    context: CanvasRenderingContext2D,
+    kind: Tank["kind"],
+    color: string,
+    accent: string,
+  ): void {
+    const isAbrams = kind === "player";
+    const isType99 = kind === "boss";
+    const barrelLength = isAbrams ? 29 : isType99 ? 30 : kind === "sniper" ? 29 : 25;
+    const barrelWidth = isType99 ? 2.4 : 2;
+
+    context.lineCap = "butt";
+    context.strokeStyle = "#020504";
+    context.lineWidth = barrelWidth + 2.4;
     context.beginPath();
-    context.arc(-3, 0, tank.kind === "boss" ? 3.2 : 2.1, 0, TAU);
+    context.moveTo(5, 0);
+    context.lineTo(barrelLength, 0);
+    context.stroke();
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = barrelWidth;
+    context.beginPath();
+    context.moveTo(5, 0);
+    context.lineTo(barrelLength, 0);
+    context.stroke();
+    context.strokeStyle = color;
+    context.lineWidth = 1;
+    context.strokeRect(barrelLength - 11, -1.7, 4.5, 3.4);
+
+    context.fillStyle = "#050908";
+    context.strokeStyle = color;
+    context.lineWidth = 1.8;
+    context.beginPath();
+    if (isAbrams) {
+      context.moveTo(-13.5, -8.5);
+      context.lineTo(2.5, -8.5);
+      context.lineTo(11.5, -4.5);
+      context.lineTo(11.5, 4.5);
+      context.lineTo(2.5, 8.5);
+      context.lineTo(-13.5, 8.5);
+      context.lineTo(-15, 5.5);
+      context.lineTo(-15, -5.5);
+    } else if (kind === "guard") {
+      context.ellipse(-0.5, 0, 10.5, 8.5, 0, 0, TAU);
+    } else if (kind === "scout") {
+      context.moveTo(-9.5, -6);
+      context.quadraticCurveTo(-7, -9, -1, -9);
+      context.quadraticCurveTo(7, -8, 11, -3.5);
+      context.lineTo(11, 3.5);
+      context.quadraticCurveTo(7, 8, -1, 9);
+      context.quadraticCurveTo(-7, 9, -9.5, 6);
+      context.closePath();
+    } else if (kind === "sniper") {
+      context.moveTo(-10, -7);
+      context.quadraticCurveTo(-6, -9, -1, -9);
+      context.lineTo(9.5, -5.5);
+      context.lineTo(12, -3);
+      context.lineTo(12, 3);
+      context.lineTo(9.5, 5.5);
+      context.lineTo(-1, 9);
+      context.quadraticCurveTo(-6, 9, -10, 7);
+      context.closePath();
+    } else {
+      context.moveTo(-13.5, -8.5);
+      context.lineTo(1, -9.5);
+      context.lineTo(12.5, -5);
+      context.lineTo(12.5, 5);
+      context.lineTo(1, 9.5);
+      context.lineTo(-13.5, 8.5);
+      context.lineTo(-15.5, 5);
+      context.lineTo(-15.5, -5);
+    }
+    context.closePath();
     context.fill();
-    context.restore();
+    context.stroke();
+
+    context.lineWidth = 0.9;
+    if (isAbrams) {
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      context.strokeRect(-13, -6.5, 5, 13);
+      context.beginPath();
+      context.moveTo(-10.5, -6);
+      context.lineTo(-10.5, 6);
+      context.stroke();
+      context.strokeStyle = color;
+      context.strokeRect(-3, -5.5, 6.5, 4);
+      context.beginPath();
+      context.arc(-2, 4.2, 2.4, 0, TAU);
+      context.stroke();
+      context.fillStyle = accent;
+      context.fillRect(5.5, -5, 2.5, 2.5);
+    } else if (kind === "guard") {
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      context.beginPath();
+      context.arc(-3.5, -2.7, 2.5, 0, TAU);
+      context.arc(-2.5, 3.5, 2.2, 0, TAU);
+      context.stroke();
+      context.strokeStyle = color;
+      for (const y of [-5.5, -2.7, 2.7, 5.5]) {
+        context.beginPath();
+        context.moveTo(5, y);
+        context.lineTo(9, y * 0.72);
+        context.stroke();
+      }
+      context.fillStyle = accent;
+      context.beginPath();
+      context.arc(2, 0, 1.8, 0, TAU);
+      context.fill();
+    } else if (kind === "scout") {
+      context.strokeStyle = color;
+      for (const y of [-5.6, -3, 3, 5.6]) {
+        context.beginPath();
+        context.moveTo(4, y);
+        context.lineTo(9, y * 0.6);
+        context.stroke();
+      }
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      context.beginPath();
+      context.arc(-3, 0, 3, 0, TAU);
+      context.stroke();
+      context.fillStyle = accent;
+      context.fillRect(1, -1.5, 3, 3);
+    } else if (kind === "sniper") {
+      context.strokeStyle = color;
+      context.beginPath();
+      context.moveTo(1, -7.5);
+      context.lineTo(9, -4.5);
+      context.moveTo(1, 7.5);
+      context.lineTo(9, 4.5);
+      context.stroke();
+      context.fillStyle = accent;
+      context.fillRect(6.5, -5.2, 2.8, 2.8);
+      context.fillRect(6.5, 2.4, 2.8, 2.8);
+      context.strokeStyle = "rgba(255,255,255,0.38)";
+      context.beginPath();
+      context.arc(-4, 0, 2.8, 0, TAU);
+      context.stroke();
+    } else {
+      context.strokeStyle = color;
+      for (const y of [-6.5, -3.2, 3.2, 6.5]) {
+        context.beginPath();
+        context.moveTo(2, y);
+        context.lineTo(10, y * 0.66);
+        context.stroke();
+      }
+      context.strokeStyle = "rgba(255,255,255,0.34)";
+      context.strokeRect(-13, -6.5, 5.5, 13);
+      context.beginPath();
+      context.arc(-2, 2.8, 2.5, 0, TAU);
+      context.stroke();
+      context.fillStyle = accent;
+      context.fillRect(1.5, -5, 3.4, 3.4);
+      context.fillRect(7, 2, 2.5, 2.5);
+    }
   }
 
   private drawBossArmor(context: CanvasRenderingContext2D, tank: Tank): void {
