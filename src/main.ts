@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { TinyTanks } from "./game/TinyTanks";
 import "./style.css";
 
@@ -8,4 +7,8 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
-createRoot(root).render(<TinyTanks />);
+const game = new TinyTanks(root);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => game.destroy());
+}
