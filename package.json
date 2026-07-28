@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "render:tanks": "node tools/render-tanks.mjs",
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs"
   },
   "devDependencies": {

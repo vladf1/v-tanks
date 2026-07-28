@@ -164,13 +164,13 @@ button:focus-visible {
 .top-readout > div {
   display: grid;
   align-content: center;
-  min-width: 116px;
-  padding: 0 18px;
+  min-width: 104px;
+  padding: 0 14px;
   border-left: 1px solid rgba(157, 255, 215, 0.1);
 }
 
 .top-readout > div:first-child {
-  min-width: 210px;
+  min-width: 200px;
   border-left: 0;
 }
 
@@ -368,20 +368,20 @@ button:focus-visible {
 
 .mission-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin: 18px 0;
 }
 
 .mission-card {
   position: relative;
-  min-height: 86px;
+  min-height: 78px;
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
   align-items: start;
-  gap: 4px 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 10px;
   border: 1px solid rgba(157, 255, 215, 0.12);
   background: rgba(2, 7, 5, 0.66);
   color: var(--ink);
@@ -413,14 +413,14 @@ button:focus-visible {
 }
 
 .mission-name {
-  padding-right: 18px;
-  font: 700 11px/1.1 var(--font-mono);
+  padding-right: 0;
+  font: 700 9px/1.15 var(--font-mono);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .threat {
-  grid-column: 1 / -1;
+  grid-column: 1;
   align-self: end;
   width: max-content;
   padding: 3px 5px;
@@ -431,6 +431,7 @@ button:focus-visible {
 }
 
 .threat-high,
+.threat-extreme,
 .threat-boss {
   color: var(--danger);
 }
@@ -642,6 +643,61 @@ kbd {
   box-shadow: 0 0 12px rgba(255, 124, 115, 0.34);
 }
 
+.powerup-readout {
+  position: absolute;
+  z-index: 4;
+  top: 96px;
+  left: 30px;
+  width: 190px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(157, 255, 215, 0.16);
+  background: rgba(3, 9, 7, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+.powerup-readout > span {
+  color: var(--muted);
+  font: 700 8px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+}
+
+.powerup-readout > div {
+  display: grid;
+  gap: 7px;
+}
+
+.powerup-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  color: var(--powerup-color);
+  font: 700 8px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.powerup-chip strong {
+  color: var(--ink);
+  font: inherit;
+}
+
+.powerup-chip > i {
+  grid-column: 1 / -1;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--powerup-color) 14%, transparent);
+}
+
+.powerup-chip > i b {
+  display: block;
+  height: 100%;
+  background: var(--powerup-color);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--powerup-color) 44%, transparent);
+  transition: width 80ms linear;
+}
+
 .overlay-screen {
   position: absolute;
   z-index: 10;
@@ -798,8 +854,9 @@ kbd {
   }
 
   .mission-card {
-    min-height: 72px;
-    padding: 9px;
+    min-height: 64px;
+    gap: 4px;
+    padding: 8px;
   }
 
   .mission-brief {

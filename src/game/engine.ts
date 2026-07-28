@@ -1,6 +1,7 @@
 import {
   BOSS_TANK_RADIUS,
   findMissionSpawnOverlaps,
+  getMissionEnemyTotal,
   MISSIONS,
   STANDARD_TANK_RADIUS,
   TANK_WALL_PADDING,
@@ -11,12 +12,33 @@ import {
   type Wall,
 } from "./levels";
 import {
+  findReinforcementEntry,
+  getReinforcementDelay,
+  pickReinforcementKind,
+} from "./reinforcements.ts";
+import {
   ENEMY_ACCENT,
   ENEMY_COLOR,
   GameRenderer,
   PLAYER_ACCENT,
   PLAYER_COLOR,
 } from "./renderer";
+import {
+  POWER_UP_DEFINITIONS,
+  absorbShieldDamage,
+  activateTimedPowerUp,
+  createActivePowerUps,
+  getActivePowerUpSnapshots,
+  getPlayerReloadTime,
+  getPlayerShellStats,
+  getPlayerSpeedMultiplier,
+  placeMissionPowerUps,
+  tickActivePowerUps,
+  type ActivePowerUpSnapshot,
+  type ActivePowerUps,
+  type PowerUp,
+  type TimedPowerUpKind,
+} from "./powerups";
 
 export type GamePhase = "menu" | "playing" | "paused" | "victory" | "defeat";
 
@@ -25,11 +47,15 @@ export interface GameSnapshot {
   missionIndex: number;
   health: number;
   enemiesLeft: number;
+  activeEnemies: number;
+  totalEnemies: number;
+  completionPercent: number;
   elapsed: number;
   shots: number;
   hits: number;
   dashReady: number;
   bossHealth: number | null;
+  activePowerUps: ActivePowerUpSnapshot[];
 }
 
 export interface Tank extends Point {
@@ -201,6 +227,10 @@ class SynthAudio {
   dash(): void {
     this.tone(420, 0.12, 0.025, "triangle");
   }
+
+  powerUp(): void {
+    this.tone(720, 0.18, 0.035, "triangle");
+  }
 }
 
 export class TankGame {
@@ -218,13 +248,20 @@ export class TankGame {
   private enemies: Tank[] = [];
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
+  private powerUps: PowerUp[] = [];
+  private activePowerUps: ActivePowerUps = createActivePowerUps();
   private mouse = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
+  private pointerClient: Point | null = null;
+  private primaryFireHeld = false;
   private elapsed = 0;
   private shots = 0;
   private hits = 0;
   private clearTimer = 0;
   private snapshotTimer = 0;
   private attractTime = 0;
+  private reinforcementsRemaining = 0;
+  private reinforcementTimer = 0;
+  private nextEnemyId = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -249,6 +286,7 @@ export class TankGame {
   }
 
   showMenu(): void {
+    this.primaryFireHeld = false;
     this.phase = "menu";
     this.onPhase(this.phase);
     this.publishSnapshot();
@@ -265,28 +303,18 @@ export class TankGame {
       );
     }
     this.player = this.createPlayer(this.mission.player);
-    this.enemies = this.mission.enemies.map((spawn, id) => {
-      const maxHp = spawn.kind === "boss" ? 7 : 1;
-      return {
-        id,
-        kind: spawn.kind,
-        x: spawn.x,
-        y: spawn.y,
-        radius: spawn.kind === "boss" ? BOSS_TANK_RADIUS : STANDARD_TANK_RADIUS,
-        hullAngle: Math.PI,
-        turretAngle: Math.PI,
-        hp: maxHp,
-        maxHp,
-        cooldown: 0.7 + (id * 0.16),
-        dashCooldown: 0,
-        invulnerable: 0,
-        alive: true,
-        patrolAngle: (id * 1.73) % TAU,
-        strafeDirection: seededDirection(id),
-      };
-    });
+    this.nextEnemyId = 0;
+    this.enemies = this.mission.enemies.map((spawn) => (
+      this.createEnemy(spawn.kind, spawn)
+    ));
+    this.reinforcementsRemaining = this.mission.reinforcements.count;
+    this.reinforcementTimer = getReinforcementDelay(this.mission);
     this.projectiles = [];
     this.particles = [];
+    this.powerUps = placeMissionPowerUps(this.mission);
+    this.activePowerUps = createActivePowerUps();
+    this.primaryFireHeld = false;
+    this.mouse = { x: this.player.x + 180, y: this.player.y };
     this.elapsed = 0;
     this.shots = 0;
     this.hits = 0;
@@ -298,6 +326,7 @@ export class TankGame {
 
   pause(): void {
     if (this.phase !== "playing") return;
+    this.primaryFireHeld = false;
     this.phase = "paused";
     this.onPhase(this.phase);
     this.publishSnapshot();
@@ -331,6 +360,29 @@ export class TankGame {
     };
   }
 
+  private createEnemy(kind: EnemyKind, position: Point): Tank {
+    const id = this.nextEnemyId;
+    this.nextEnemyId += 1;
+    const maxHp = kind === "boss" ? 7 : 1;
+    return {
+      id,
+      kind,
+      x: position.x,
+      y: position.y,
+      radius: kind === "boss" ? BOSS_TANK_RADIUS : STANDARD_TANK_RADIUS,
+      hullAngle: Math.PI,
+      turretAngle: Math.PI,
+      hp: maxHp,
+      maxHp,
+      cooldown: 0.7 + ((id % 5) * 0.16),
+      dashCooldown: 0,
+      invulnerable: 0,
+      alive: true,
+      patrolAngle: (id * 1.73) % TAU,
+      strafeDirection: seededDirection(id),
+    };
+  }
+
   private readonly frame = (timestamp: number): void => {
     const rawDelta = this.previousFrame === 0 ? 0 : (timestamp - this.previousFrame) / 1000;
     this.previousFrame = timestamp;
@@ -352,6 +404,8 @@ export class TankGame {
       enemies: this.enemies,
       projectiles: this.projectiles,
       particles: this.particles,
+      powerUps: this.powerUps,
+      activePowerUps: this.activePowerUps,
       mouse: this.mouse,
       attractTime: this.attractTime,
     });
@@ -363,6 +417,9 @@ export class TankGame {
     window.addEventListener("keyup", this.onKeyUp);
     this.canvas.addEventListener("pointermove", this.onPointerMove);
     this.canvas.addEventListener("pointerdown", this.onPointerDown);
+    window.addEventListener("pointerup", this.onPointerUp);
+    window.addEventListener("pointercancel", this.onPointerCancel);
+    window.addEventListener("blur", this.onWindowBlur);
     this.canvas.addEventListener("contextmenu", this.onContextMenu);
   }
 
@@ -371,6 +428,9 @@ export class TankGame {
     window.removeEventListener("keyup", this.onKeyUp);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
+    window.removeEventListener("pointerup", this.onPointerUp);
+    window.removeEventListener("pointercancel", this.onPointerCancel);
+    window.removeEventListener("blur", this.onWindowBlur);
     this.canvas.removeEventListener("contextmenu", this.onContextMenu);
   }
 
@@ -395,13 +455,34 @@ export class TankGame {
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
-    this.mouse = this.renderer.clientToWorld(event.clientX, event.clientY);
+    this.pointerClient = { x: event.clientX, y: event.clientY };
+    this.mouse = this.renderer.clientToWorld(
+      event.clientX,
+      event.clientY,
+      this.phase === "menu" ? undefined : this.player,
+    );
   };
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     this.onPointerMove(event);
-    if (event.button === 0) this.tryPlayerShoot();
+    if (event.button === 0) {
+      this.primaryFireHeld = true;
+      this.tryPlayerShoot();
+    }
     if (event.button === 2) this.tryDash();
+  };
+
+  private readonly onPointerUp = (event: PointerEvent): void => {
+    if (event.button === 0) this.primaryFireHeld = false;
+  };
+
+  private readonly onPointerCancel = (): void => {
+    this.primaryFireHeld = false;
+  };
+
+  private readonly onWindowBlur = (): void => {
+    this.keys.clear();
+    this.primaryFireHeld = false;
   };
 
   private readonly onContextMenu = (event: MouseEvent): void => {
@@ -414,16 +495,21 @@ export class TankGame {
     this.player.cooldown = Math.max(0, this.player.cooldown - delta);
     this.player.dashCooldown = Math.max(0, this.player.dashCooldown - delta);
     this.player.invulnerable = Math.max(0, this.player.invulnerable - delta);
+    tickActivePowerUps(this.activePowerUps, delta);
 
     this.updatePlayer(delta);
+    this.collectPowerUps();
     this.updateEnemies(delta);
     this.updateProjectiles(delta);
+    this.updateReinforcements(delta);
     this.updateParticles(delta);
 
-    const enemiesLeft = this.enemies.filter((enemy) => enemy.alive).length;
+    const enemiesLeft = this.getEnemiesLeft();
     if (enemiesLeft === 0) {
       this.clearTimer += delta;
       if (this.clearTimer >= 1.05) this.setPhase("victory");
+    } else {
+      this.clearTimer = 0;
     }
 
     if (!this.player.alive) this.setPhase("defeat");
@@ -446,10 +532,18 @@ export class TankGame {
       movementY /= length;
       const angle = Math.atan2(movementY, movementX);
       this.player.hullAngle = turnTowards(this.player.hullAngle, angle, delta * 9);
-      this.moveTank(this.player, movementX * PLAYER_SPEED * delta, movementY * PLAYER_SPEED * delta);
+      const speed = PLAYER_SPEED * getPlayerSpeedMultiplier(this.activePowerUps);
+      this.moveTank(this.player, movementX * speed * delta, movementY * speed * delta);
+    }
+    if (this.pointerClient) {
+      this.mouse = this.renderer.clientToWorld(
+        this.pointerClient.x,
+        this.pointerClient.y,
+        this.player,
+      );
     }
     this.player.turretAngle = Math.atan2(this.mouse.y - this.player.y, this.mouse.x - this.player.x);
-    if (this.keys.has(" ")) this.tryPlayerShoot();
+    if (this.primaryFireHeld || this.keys.has(" ")) this.tryPlayerShoot();
   }
 
   private updateEnemies(delta: number): void {
@@ -493,6 +587,49 @@ export class TankGame {
     }
   }
 
+  private updateReinforcements(delta: number): void {
+    if (this.reinforcementsRemaining <= 0 || !this.player.alive) return;
+    const activeEnemies = this.enemies.filter((enemy) => enemy.alive);
+    this.reinforcementTimer -= delta;
+    if (activeEnemies.length === 0) {
+      this.reinforcementTimer = Math.min(this.reinforcementTimer, 0.9);
+    }
+    if (this.reinforcementTimer > 0) return;
+    if (activeEnemies.length >= this.mission.reinforcements.maxConcurrent) {
+      this.reinforcementTimer = 0.7;
+      return;
+    }
+
+    const entry = findReinforcementEntry(
+      this.mission,
+      this.player,
+      activeEnemies,
+    );
+    if (!entry) {
+      this.reinforcementTimer = 0.7;
+      return;
+    }
+
+    const enemy = this.createEnemy(pickReinforcementKind(this.mission), entry);
+    const inwardAngle = Math.atan2(
+      (WORLD_HEIGHT / 2) - enemy.y,
+      (WORLD_WIDTH / 2) - enemy.x,
+    );
+    enemy.hullAngle = inwardAngle;
+    enemy.turretAngle = inwardAngle;
+    enemy.cooldown = 1.1 + (Math.random() * 0.45);
+    this.enemies.push(enemy);
+    this.reinforcementsRemaining -= 1;
+    this.reinforcementTimer = getReinforcementDelay(this.mission);
+    this.spawnImpactParticles(enemy.x, enemy.y, ENEMY_ACCENT, 14);
+    this.publishSnapshot();
+  }
+
+  private getEnemiesLeft(): number {
+    return this.reinforcementsRemaining
+      + this.enemies.filter((enemy) => enemy.alive).length;
+  }
+
   private moveTank(tank: Tank, amountX: number, amountY: number): void {
     const originalX = tank.x;
     tank.x = clamp(tank.x + amountX, TANK_GUTTER, WORLD_WIDTH - TANK_GUTTER);
@@ -510,10 +647,42 @@ export class TankGame {
 
   private tryPlayerShoot(): void {
     if (this.phase !== "playing" || this.player.cooldown > 0 || !this.player.alive) return;
-    this.player.cooldown = 0.3;
+    this.player.cooldown = getPlayerReloadTime(this.activePowerUps);
     this.shots += 1;
-    this.spawnProjectile(this.player, this.player.turretAngle, "player", 535, 1, 1);
+    const shell = getPlayerShellStats(this.activePowerUps);
+    this.spawnProjectile(
+      this.player,
+      this.player.turretAngle,
+      "player",
+      535,
+      shell.bounces,
+      shell.damage,
+    );
     this.audio.shoot(true);
+  }
+
+  private collectPowerUps(): void {
+    for (const powerUp of this.powerUps) {
+      if (!powerUp.active) continue;
+      const radius = this.player.radius + powerUp.radius;
+      if (distanceSquared(this.player, powerUp) > radius * radius) continue;
+      if (powerUp.kind === "repair" && this.player.hp >= this.player.maxHp) continue;
+
+      powerUp.active = false;
+      if (powerUp.kind === "repair") {
+        this.player.hp = this.player.maxHp;
+      } else {
+        activateTimedPowerUp(this.activePowerUps, powerUp.kind as TimedPowerUpKind);
+      }
+      this.spawnExplosion(
+        powerUp.x,
+        powerUp.y,
+        14,
+        POWER_UP_DEFINITIONS[powerUp.kind].color,
+      );
+      this.audio.powerUp();
+      this.publishSnapshot();
+    }
   }
 
   private enemyShoot(enemy: Tank): void {
@@ -553,7 +722,9 @@ export class TankGame {
       bounces,
       damage,
       radius: owner === "player" ? 4 : 4.5,
-      color: owner === "player" ? "#ffe27a" : "#ff8c7d",
+      color: owner === "player"
+        ? damage > 1 ? POWER_UP_DEFINITIONS.ricochet.color : "#ffe27a"
+        : "#ff8c7d",
     });
     this.spawnMuzzleParticles(x, y, angle, owner === "player" ? PLAYER_ACCENT : ENEMY_ACCENT);
   }
@@ -685,7 +856,20 @@ export class TankGame {
   }
 
   private damagePlayer(damage: number): void {
-    this.player.hp -= damage;
+    const remainingDamage = absorbShieldDamage(this.activePowerUps, damage);
+    if (remainingDamage < damage) {
+      this.player.invulnerable = 0.24;
+      this.spawnImpactParticles(
+        this.player.x,
+        this.player.y,
+        POWER_UP_DEFINITIONS.shield.color,
+        12,
+      );
+      this.audio.impact();
+      if (remainingDamage <= 0) return;
+    }
+
+    this.player.hp -= remainingDamage;
     this.player.invulnerable = 0.86;
     this.spawnExplosion(this.player.x, this.player.y, 18, PLAYER_COLOR);
     this.audio.impact();
@@ -769,16 +953,23 @@ export class TankGame {
 
   private publishSnapshot(): void {
     const boss = this.enemies.find((enemy) => enemy.kind === "boss" && enemy.alive);
+    const totalEnemies = getMissionEnemyTotal(this.mission);
+    const activeEnemies = this.enemies.filter((enemy) => enemy.alive).length;
+    const enemiesLeft = this.reinforcementsRemaining + activeEnemies;
     this.onSnapshot({
       phase: this.phase,
       missionIndex: this.missionIndex,
       health: Math.max(0, this.player.hp),
-      enemiesLeft: this.enemies.filter((enemy) => enemy.alive).length,
+      enemiesLeft,
+      activeEnemies,
+      totalEnemies,
+      completionPercent: Math.round(((totalEnemies - enemiesLeft) / totalEnemies) * 100),
       elapsed: this.elapsed,
       shots: this.shots,
       hits: this.hits,
       dashReady: 1 - clamp(this.player.dashCooldown / 3.4, 0, 1),
       bossHealth: boss ? boss.hp / boss.maxHp : null,
+      activePowerUps: getActivePowerUpSnapshots(this.activePowerUps),
     });
   }
 

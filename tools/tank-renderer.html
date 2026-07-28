@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V/Tanks — Tank Renderer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+        background: #020504;
+        color: #effff7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        display: grid;
+        width: 1280px;
+        height: 720px;
+        margin: 0;
+        place-items: center;
+        overflow: hidden;
+        background: radial-gradient(circle at 50% 44%, #0a1713, #020504 72%);
+      }
+
+      figure {
+        width: 1120px;
+        margin: 0;
+        overflow: hidden;
+        border: 1px solid rgba(157, 255, 215, 0.28);
+        background: rgba(3, 9, 7, 0.82);
+      }
+
+      canvas {
+        display: block;
+        width: 1120px;
+        height: 560px;
+      }
+
+      figcaption {
+        display: flex;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-top: 1px solid rgba(157, 255, 215, 0.18);
+        font-size: 16px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      figcaption span {
+        color: #8db5a3;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import {
+        ENEMY_ACCENT,
+        ENEMY_COLOR,
+        GameRenderer,
+        PLAYER_ACCENT,
+        PLAYER_COLOR,
+      } from "/src/game/renderer.ts";
+
+      const variants = {
+        player: {
+          label: "Player",
+          model: "Abrams",
+          color: PLAYER_COLOR,
+          accent: PLAYER_ACCENT,
+          radius: 15,
+        },
+        scout: {
+          label: "Enemy",
+          model: "Scout",
+          color: ENEMY_COLOR,
+          accent: ENEMY_ACCENT,
+          radius: 15,
+        },
+        guard: {
+          label: "Enemy",
+          model: "Guard",
+          color: ENEMY_COLOR,
+          accent: ENEMY_ACCENT,
+          radius: 15,
+        },
+        sniper: {
+          label: "Enemy",
+          model: "Sniper",
+          color: ENEMY_COLOR,
+          accent: ENEMY_ACCENT,
+          radius: 15,
+        },
+        boss: {
+          label: "Enemy",
+          model: "Type 99",
+          color: ENEMY_COLOR,
+          accent: "#ffe27a",
+          radius: 25,
+        },
+      };
+
+      const requestedKind = new URLSearchParams(window.location.search).get("kind") ?? "player";
+      const variant = variants[requestedKind];
+      if (!variant) throw new Error(`Unknown tank kind: ${requestedKind}`);
+
+      const figure = document.createElement("figure");
+      const canvas = document.createElement("canvas");
+      canvas.width = 1120;
+      canvas.height = 560;
+      const caption = document.createElement("figcaption");
+      caption.innerHTML = `${variant.label}<span>${variant.model}</span>`;
+      figure.append(canvas, caption);
+      document.body.append(figure);
+
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas 2D is unavailable.");
+      context.scale(10, 10);
+      context.fillStyle = "#03100c";
+      context.fillRect(0, 0, 112, 56);
+      context.strokeStyle = "rgba(157, 255, 215, 0.08)";
+      context.lineWidth = 0.2;
+      context.beginPath();
+      for (let x = 0; x <= 112; x += 8) {
+        context.moveTo(x, 0);
+        context.lineTo(x, 56);
+      }
+      for (let y = 0; y <= 56; y += 8) {
+        context.moveTo(0, y);
+        context.lineTo(112, y);
+      }
+      context.stroke();
+
+      GameRenderer.renderTankPreview(context, {
+        id: -1,
+        kind: requestedKind,
+        x: requestedKind === "boss" ? 49 : 47,
+        y: 28,
+        radius: variant.radius,
+        hullAngle: 0,
+        turretAngle: 0,
+        hp: 1,
+        maxHp: 1,
+        cooldown: 0,
+        dashCooldown: 0,
+        invulnerable: 0,
+        alive: true,
+        patrolAngle: 0,
+        strafeDirection: 1,
+      }, variant.color, variant.accent);
+
+      document.documentElement.dataset.renderReady = "true";
+    </script>
+  </body>
+</html>

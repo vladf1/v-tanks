@@ -1,17 +1,22 @@
 import { TankGame, type GamePhase, type GameSnapshot } from "./engine";
-import { MISSIONS } from "./levels";
+import { getMissionEnemyTotal, MISSIONS } from "./levels";
+import { POWER_UP_DEFINITIONS } from "./powerups";
 import gameShell from "./v-tanks.html?raw";
 
 const INITIAL_SNAPSHOT: GameSnapshot = {
   phase: "menu",
   missionIndex: 0,
   health: 3,
-  enemiesLeft: MISSIONS[0].enemies.length,
+  enemiesLeft: getMissionEnemyTotal(MISSIONS[0]),
+  activeEnemies: MISSIONS[0].enemies.length,
+  totalEnemies: getMissionEnemyTotal(MISSIONS[0]),
+  completionPercent: 0,
   elapsed: 0,
   shots: 0,
   hits: 0,
   dashReady: 1,
   bossHealth: null,
+  activePowerUps: [],
 };
 
 const PROGRESS_KEY = "v-tanks-campaign-v1";
@@ -70,6 +75,8 @@ export class VTanks {
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = gameShell;
     requiredElement(root, ".mission-grid").innerHTML = missionCards();
+    requiredElement(root, "[data-campaign-total]").textContent =
+      `/${MISSIONS.length.toString().padStart(2, "0")}`;
     this.shell = requiredElement(root, ".game-shell");
     this.canvas = requiredElement(root, ".game-canvas");
     root.addEventListener("click", this.onClick);
@@ -153,6 +160,8 @@ export class VTanks {
     const selected = MISSIONS[this.selectedMission];
     const playing = this.phase === "playing";
 
+    this.canvas.dataset.shotsFired = String(this.snapshot.shots);
+    this.canvas.dataset.activeEnemies = String(this.snapshot.activeEnemies);
     this.shell.className = `game-shell phase-${this.phase}`;
     this.root.querySelectorAll<HTMLElement>("[data-screen]").forEach((screen) => {
       screen.hidden = screen.dataset.screen !== this.phase;
@@ -166,7 +175,9 @@ export class VTanks {
     requiredElement(this.root, "[data-current-mission]").textContent =
       `${currentMission.number} / ${currentMission.name}`;
     requiredElement(this.root, "[data-targets]").textContent =
-      this.snapshot.enemiesLeft.toString().padStart(2, "0");
+      `${this.snapshot.enemiesLeft} / ${this.snapshot.totalEnemies}`;
+    requiredElement(this.root, "[data-mission-completion]").textContent =
+      `${this.snapshot.completionPercent}%`;
     requiredElement(this.root, "[data-time]").textContent = formatTime(this.snapshot.elapsed);
 
     const soundButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="sound"]');
@@ -185,6 +196,28 @@ export class VTanks {
     requiredElement<HTMLElement>(this.root, "[data-boss-health]").style.width =
       `${(this.snapshot.bossHealth ?? 0) * 100}%`;
 
+    const powerUpReadout = requiredElement<HTMLElement>(this.root, "[data-powerup-readout]");
+    powerUpReadout.hidden = !playing || this.snapshot.activePowerUps.length === 0;
+    const activePowerUps = requiredElement<HTMLElement>(this.root, "[data-active-powerups]");
+    activePowerUps.replaceChildren(...this.snapshot.activePowerUps.map((active) => {
+      const definition = POWER_UP_DEFINITIONS[active.kind];
+      const item = document.createElement("div");
+      item.className = "powerup-chip";
+      item.style.setProperty("--powerup-color", definition.color);
+      const label = document.createElement("span");
+      label.textContent = definition.shortLabel;
+      const time = document.createElement("strong");
+      time.textContent = active.kind === "shield"
+        ? `${active.shieldPoints} SH / ${Math.ceil(active.remaining)}s`
+        : `${Math.ceil(active.remaining)}s`;
+      const track = document.createElement("i");
+      const fill = document.createElement("b");
+      fill.style.width = `${(active.remaining / active.duration) * 100}%`;
+      track.append(fill);
+      item.append(label, time, track);
+      return item;
+    }));
+
     requiredElement(this.root, "[data-campaign-progress]").textContent =
       String(this.unlockedMission + 1);
     this.root.querySelectorAll<HTMLButtonElement>("[data-mission-index]").forEach((button, index) => {
@@ -198,7 +231,8 @@ export class VTanks {
     requiredElement(this.root, "[data-selected-number]").textContent = selected.number;
     requiredElement(this.root, "[data-selected-name]").textContent = selected.name;
     requiredElement(this.root, "[data-selected-briefing]").textContent = selected.briefing;
-    requiredElement(this.root, "[data-selected-hostiles]").textContent = String(selected.enemies.length);
+    requiredElement(this.root, "[data-selected-hostiles]").textContent =
+      String(getMissionEnemyTotal(selected));
     requiredElement(this.root, "[data-selected-par]").textContent = formatTime(selected.parTime);
     requiredElement(this.root, "[data-selected-threat]").textContent = selected.threat;
 
@@ -216,8 +250,8 @@ export class VTanks {
     requiredElement<HTMLButtonElement>(this.root, '[data-action="next"]').hidden = finalMission;
     requiredElement<HTMLButtonElement>(this.root, "[data-campaign-complete]").hidden = !finalMission;
 
-    const units = this.snapshot.enemiesLeft === 1 ? "unit" : "units";
+    const units = this.snapshot.enemiesLeft === 1 ? "tank" : "tanks";
     requiredElement(this.root, "[data-defeat-message]").textContent =
-      `The arena still holds ${this.snapshot.enemiesLeft} hostile ${units}.`;
+      `The operation still has ${this.snapshot.enemiesLeft} hostile ${units} remaining.`;
   }
 }

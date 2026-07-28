@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V/Tanks — Visual Debug Gallery</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", monospace;
+        background: #020504;
+        color: #effff7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(14, 42, 33, 0.7), transparent 42rem),
+          #020504;
+      }
+
+      header,
+      main {
+        width: min(1500px, calc(100% - 32px));
+        margin-inline: auto;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px 30px;
+        align-items: end;
+        justify-content: space-between;
+        padding: 34px 0 22px;
+        border-bottom: 1px solid rgba(157, 255, 215, 0.24);
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        color: #9dffd7;
+        font-size: clamp(22px, 3vw, 34px);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow,
+      .status,
+      label,
+      figcaption span {
+        color: #88aa9b;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow {
+        margin-bottom: 8px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .index-link {
+        padding-right: 12px;
+        border-right: 1px solid rgba(157, 255, 215, 0.24);
+        color: #9dffd7;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .index-link:hover,
+      .index-link:focus-visible {
+        color: #effff7;
+        outline: none;
+      }
+
+      input {
+        width: min(250px, 42vw);
+        accent-color: #9dffd7;
+      }
+
+      output {
+        min-width: 62px;
+        color: #ffe27a;
+        font-size: 12px;
+      }
+
+      main {
+        padding: 28px 0 60px;
+      }
+
+      section + section {
+        margin-top: 36px;
+      }
+
+      .section-heading {
+        display: flex;
+        gap: 18px;
+        align-items: baseline;
+        margin-bottom: 14px;
+      }
+
+      h2 {
+        font-size: 15px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+        gap: 14px;
+      }
+
+      figure {
+        min-width: 0;
+        margin: 0;
+        overflow: hidden;
+        border: 1px solid rgba(157, 255, 215, 0.2);
+        border-radius: 5px;
+        background: rgba(3, 9, 7, 0.88);
+        box-shadow: 0 15px 36px rgba(0, 0, 0, 0.22);
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        aspect-ratio: 18 / 11;
+        background: #03100c;
+      }
+
+      .obstacle canvas {
+        aspect-ratio: 2 / 1;
+      }
+
+      figcaption {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-top: 1px solid rgba(157, 255, 215, 0.14);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .player {
+        color: #9dffd7;
+      }
+
+      .enemy {
+        color: #ff7c73;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Production renderer reference</p>
+        <h1>Visual Debug Gallery</h1>
+      </div>
+      <div class="controls">
+        <a class="index-link" href="/debug/index.html">Debug index</a>
+        <label for="angle">Tank angle</label>
+        <input id="angle" type="range" min="-180" max="180" value="0">
+        <output id="angle-output" for="angle">0°</output>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <div class="section-heading">
+          <h2>Tanks</h2>
+          <p class="status">Hull and turret aligned for silhouette checks</p>
+        </div>
+        <div id="tanks" class="grid"></div>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>Fortifications</h2>
+          <p class="status">Multiple seeded pieces show deterministic variation</p>
+        </div>
+        <div id="obstacles" class="grid"></div>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>Power-ups</h2>
+          <p class="status">Mission pickups rendered with their production icons and colors</p>
+        </div>
+        <div id="powerups" class="grid"></div>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>Combat effects</h2>
+          <p class="status">Live projectile, impact-particle, targeting, and boss-armor shapes</p>
+        </div>
+        <div id="effects" class="grid"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      import {
+        ENEMY_ACCENT,
+        ENEMY_COLOR,
+        GameRenderer,
+        PLAYER_ACCENT,
+        PLAYER_COLOR,
+      } from "/src/game/renderer.ts";
+      import {
+        POWER_UP_DEFINITIONS,
+        POWER_UP_KINDS,
+      } from "/src/game/powerups.ts";
+
+      const tankVariants = [
+        { kind: "player", label: "Player", model: "Abrams", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
+        { kind: "scout", label: "Enemy", model: "Scout", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
+        { kind: "guard", label: "Enemy", model: "Guard", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
+        { kind: "sniper", label: "Enemy", model: "Sniper", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
+        { kind: "boss", label: "Enemy", model: "Type 99 Boss", color: ENEMY_COLOR, accent: "#ffe27a", radius: 25 },
+      ];
+
+      const obstacleVariants = [
+        { kind: "rock", label: "Rock wall", note: "Irregular stone" },
+        { kind: "dragons-teeth", label: "Dragon’s teeth", note: "Concrete obstacles" },
+        { kind: "hedgehog", label: "Czech hedgehogs", note: "Steel obstacles" },
+      ];
+
+      const tanksRoot = document.querySelector("#tanks");
+      const obstaclesRoot = document.querySelector("#obstacles");
+      const powerUpsRoot = document.querySelector("#powerups");
+      const effectsRoot = document.querySelector("#effects");
+      const angleInput = document.querySelector("#angle");
+      const angleOutput = document.querySelector("#angle-output");
+
+      function createCard(label, note, className = "") {
+        const figure = document.createElement("figure");
+        figure.className = className;
+        const canvas = document.createElement("canvas");
+        const caption = document.createElement("figcaption");
+        caption.innerHTML = `${label}<span>${note}</span>`;
+        figure.append(canvas, caption);
+        return { figure, canvas };
+      }
+
+      function prepareCanvas(canvas, logicalWidth, logicalHeight, scale) {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.round(logicalWidth * scale * dpr);
+        canvas.height = Math.round(logicalHeight * scale * dpr);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas 2D is unavailable.");
+        context.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+        context.fillStyle = "#03100c";
+        context.fillRect(0, 0, logicalWidth, logicalHeight);
+        context.strokeStyle = "rgba(157, 255, 215, 0.08)";
+        context.lineWidth = 0.25;
+        context.beginPath();
+        for (let x = 0; x <= logicalWidth; x += 8) {
+          context.moveTo(x, 0);
+          context.lineTo(x, logicalHeight);
+        }
+        for (let y = 0; y <= logicalHeight; y += 8) {
+          context.moveTo(0, y);
+          context.lineTo(logicalWidth, y);
+        }
+        context.stroke();
+        return context;
+      }
+
+      const tankCards = tankVariants.map((variant) => {
+        const card = createCard(
+          variant.label,
+          variant.model,
+          variant.kind === "player" ? "player" : "enemy",
+        );
+        tanksRoot.append(card.figure);
+        return { ...card, variant };
+      });
+
+      function renderTanks() {
+        const angle = Number(angleInput.value) * Math.PI / 180;
+        angleOutput.value = `${angleInput.value}°`;
+        tankCards.forEach(({ canvas, variant }) => {
+          const context = prepareCanvas(canvas, 72, 44, 5);
+          const tank = {
+            id: -1,
+            kind: variant.kind,
+            x: variant.kind === "boss" ? 28 : 27,
+            y: 22,
+            radius: variant.radius,
+            hullAngle: angle,
+            turretAngle: angle,
+            hp: 1,
+            maxHp: 1,
+            cooldown: 0,
+            dashCooldown: 0,
+            invulnerable: 0,
+            alive: true,
+            patrolAngle: 0,
+            strafeDirection: 1,
+          };
+          GameRenderer.renderTankPreview(context, tank, variant.color, variant.accent);
+        });
+      }
+
+      obstacleVariants.forEach((variant, index) => {
+        const { figure, canvas } = createCard(variant.label, variant.note, "obstacle");
+        obstaclesRoot.append(figure);
+        const context = prepareCanvas(canvas, 120, 60, 3);
+        GameRenderer.renderWallPreview(context, {
+          x: 7 + index * 0.71,
+          y: 15 + index * 0.43,
+          width: 106,
+          height: 30,
+          kind: variant.kind,
+        });
+      });
+
+      POWER_UP_KINDS.forEach((kind, index) => {
+        const definition = POWER_UP_DEFINITIONS[kind];
+        const { figure, canvas } = createCard(
+          definition.label,
+          definition.duration > 0 ? `${definition.duration}s` : "Instant",
+          "obstacle",
+        );
+        powerUpsRoot.append(figure);
+        const context = prepareCanvas(canvas, 120, 60, 3);
+        GameRenderer.renderPowerUpPreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 27,
+          radius: 15,
+          active: true,
+        }, 1.25);
+      });
+
+      const projectileCard = createCard("Projectiles", "Player and enemy fire", "obstacle");
+      effectsRoot.append(projectileCard.figure);
+      {
+        const context = prepareCanvas(projectileCard.canvas, 120, 60, 3);
+        for (const [index, color] of [PLAYER_ACCENT, ENEMY_ACCENT].entries()) {
+          GameRenderer.renderProjectilePreview(context, {
+            x: 40 + index * 45,
+            y: 22 + index * 17,
+            previousX: 0,
+            previousY: 0,
+            velocityX: 260,
+            velocityY: index === 0 ? -40 : 40,
+            owner: index === 0 ? "player" : "enemy",
+            life: 1,
+            bounces: index,
+            damage: 1,
+            radius: 2.6,
+            color,
+          });
+        }
+      }
+
+      const particleCard = createCard("Impact particles", "Damage and debris", "obstacle");
+      effectsRoot.append(particleCard.figure);
+      {
+        const context = prepareCanvas(particleCard.canvas, 120, 60, 3);
+        const colors = [PLAYER_COLOR, PLAYER_ACCENT, ENEMY_COLOR, ENEMY_ACCENT, "#ffffff"];
+        for (let index = 0; index < 18; index += 1) {
+          const angle = (index / 18) * Math.PI * 2;
+          GameRenderer.renderParticlePreview(context, {
+            x: 60 + Math.cos(angle) * (10 + index % 3),
+            y: 30 + Math.sin(angle) * (10 + index % 3),
+            velocityX: Math.cos(angle) * 100,
+            velocityY: Math.sin(angle) * 100,
+            life: 0.5 + (index % 4) * 0.12,
+            maxLife: 1,
+            size: 1.6 + (index % 3) * 0.4,
+            color: colors[index % colors.length],
+          });
+        }
+      }
+
+      const targetingCard = createCard("Targeting", "Crosshair and boss armor", "obstacle");
+      effectsRoot.append(targetingCard.figure);
+      {
+        const context = prepareCanvas(targetingCard.canvas, 120, 60, 3);
+        GameRenderer.renderCrosshairPreview(context, { x: 29, y: 30 });
+        const boss = {
+          id: -2,
+          kind: "boss",
+          x: 78,
+          y: 30,
+          radius: 25,
+          hullAngle: 0,
+          turretAngle: 0,
+          hp: 1,
+          maxHp: 1,
+          cooldown: 0,
+          dashCooldown: 0,
+          invulnerable: 0,
+          alive: true,
+          patrolAngle: 0,
+          strafeDirection: 1,
+        };
+        GameRenderer.renderBossArmorPreview(context, boss, 0.8);
+      }
+
+      angleInput.addEventListener("input", renderTanks);
+      renderTanks();
+      document.documentElement.dataset.renderReady = "true";
+    </script>
+  </body>
+</html>

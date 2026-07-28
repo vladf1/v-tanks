@@ -1,5 +1,6 @@
 /node_modules
 /dist
+/artifacts/tanks/
 *.tsbuildinfo
 .DS_Store
 npm-debug.log*

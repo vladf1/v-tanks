@@ -15,8 +15,12 @@
         <strong data-current-mission></strong>
       </div>
       <div>
-        <span>TARGETS</span>
+        <span>ENEMIES</span>
         <strong data-targets></strong>
+      </div>
+      <div>
+        <span>PROGRESS</span>
+        <strong data-mission-completion></strong>
       </div>
       <div>
         <span>TIME</span>
@@ -38,13 +42,17 @@
     <div class="dash-track"><i data-dash-charge></i></div>
   </section>
   <section class="boss-readout" data-boss hidden>
-    <span>RED CORE</span>
+    <span>OMEGA CORE</span>
     <div><i data-boss-health></i></div>
+  </section>
+  <section class="powerup-readout" data-powerup-readout hidden aria-label="Active power-ups">
+    <span>ACTIVE SYSTEMS</span>
+    <div data-active-powerups></div>
   </section>
   <div class="control-strip" data-combat hidden>
     <span><kbd>WASD</kbd> MOVE</span>
     <span><kbd>MOUSE</kbd> AIM</span>
-    <span><kbd>LMB</kbd> FIRE</span>
+    <span><kbd>LMB</kbd> HOLD FIRE</span>
     <span><kbd>SHIFT</kbd> DASH</span>
     <span><kbd>R</kbd> RESTART</span>
   </div>
@@ -78,7 +86,7 @@
           <h2>Select operation</h2>
         </div>
         <div class="campaign-progress">
-          <span data-campaign-progress></span><small>/06</small>
+          <span data-campaign-progress></span><small data-campaign-total></small>
         </div>
       </div>
       <div class="mission-grid"></div>
