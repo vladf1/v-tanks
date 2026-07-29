@@ -235,6 +235,10 @@
         { kind: "scout", label: "Enemy", model: "Scout", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
         { kind: "guard", label: "Enemy", model: "Guard", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
         { kind: "sniper", label: "Enemy", model: "Sniper", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
+        { kind: "heavy", label: "Enemy", model: "Heavy / frontal armor", color: ENEMY_COLOR, accent: "#ffb45f", radius: 15 },
+        { kind: "minelayer", label: "Enemy", model: "Minelayer / area denial", color: ENEMY_COLOR, accent: "#f06dff", radius: 15 },
+        { kind: "support", label: "Enemy", model: "Support / shielding", color: ENEMY_COLOR, accent: "#7bdcff", radius: 15 },
+        { kind: "artillery", label: "Enemy", model: "Artillery / telegraphed strike", color: ENEMY_COLOR, accent: "#ffe27a", radius: 15 },
         { kind: "boss", label: "Enemy", model: "Type 99 Boss", color: ENEMY_COLOR, accent: "#ffe27a", radius: 25 },
       ];
 
@@ -353,6 +357,75 @@
         }, 1.25);
       });
 
+      const hazardKinds = ["barrel", "mud", "minefield", "repair-station", "barricade"];
+      hazardKinds.forEach((kind, index) => {
+        const { figure, canvas } = createCard(
+          kind.replace("-", " "),
+          "Interactive battlefield system",
+          "obstacle",
+        );
+        effectsRoot.append(figure);
+        const context = prepareCanvas(canvas, 120, 60, 3);
+        GameRenderer.renderHazardPreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 30,
+          radius: kind === "mud" ? 28 : 20,
+          active: true,
+          cooldown: 0,
+        }, 1.25);
+      });
+
+      for (const [index, kind] of ["relay", "uplink", "extract"].entries()) {
+        const { figure, canvas } = createCard(
+          kind,
+          "Mission objective",
+          "obstacle",
+        );
+        effectsRoot.append(figure);
+        const context = prepareCanvas(canvas, 120, 60, 3);
+        GameRenderer.renderObjectivePreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 30,
+          radius: 24,
+          hp: 3,
+          maxHp: 3,
+          active: true,
+        }, 1.25);
+      }
+
+      const mineCard = createCard("Proximity mines", "Player and enemy utility", "obstacle");
+      effectsRoot.append(mineCard.figure);
+      {
+        const context = prepareCanvas(mineCard.canvas, 120, 60, 3);
+        for (const [index, owner] of ["player", "enemy"].entries()) {
+          GameRenderer.renderMinePreview(context, {
+            id: index,
+            owner,
+            x: 42 + index * 38,
+            y: 30,
+            armTime: 0,
+            life: 10,
+          }, 1.25);
+        }
+      }
+
+      const artilleryCard = createCard("Artillery warning", "Telegraphed impact", "obstacle");
+      effectsRoot.append(artilleryCard.figure);
+      {
+        const context = prepareCanvas(artilleryCard.canvas, 120, 60, 3);
+        GameRenderer.renderArtilleryPreview(context, {
+          x: 60,
+          y: 30,
+          radius: 24,
+          delay: 0.5,
+          enemyId: 1,
+        });
+      }
+
       const projectileCard = createCard("Projectiles", "Player and enemy fire", "obstacle");
       effectsRoot.append(projectileCard.figure);
       {
@@ -371,6 +444,7 @@
             damage: 1,
             radius: 2.6,
             color,
+            ricocheted: index === 0,
           });
         }
       }

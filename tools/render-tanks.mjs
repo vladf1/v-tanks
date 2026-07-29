@@ -6,7 +6,17 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
-const TANK_KINDS = ["player", "scout", "guard", "sniper", "boss"];
+const TANK_KINDS = [
+  "player",
+  "scout",
+  "guard",
+  "sniper",
+  "heavy",
+  "minelayer",
+  "support",
+  "artillery",
+  "boss",
+];
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const OUTPUT_DIR = path.resolve(PROJECT_ROOT, "artifacts", "tanks");

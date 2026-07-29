@@ -8,7 +8,17 @@ import {
   type Point,
   type Wall,
 } from "./levels";
-import type { GamePhase, Particle, Projectile, Tank } from "./engine";
+import type {
+  ArtilleryStrike,
+  GamePhase,
+  HazardState,
+  ObjectiveNode,
+  Particle,
+  Projectile,
+  ProximityMine,
+  Tank,
+  TrackMark,
+} from "./engine";
 import {
   POWER_UP_DEFINITIONS,
   type ActivePowerUps,
@@ -36,6 +46,12 @@ export interface RenderState {
   particles: Particle[];
   powerUps: PowerUp[];
   activePowerUps: ActivePowerUps;
+  objectiveNodes: ObjectiveNode[];
+  hazards: HazardState[];
+  mines: ProximityMine[];
+  artilleryStrikes: ArtilleryStrike[];
+  trackMarks: TrackMark[];
+  shake: number;
   mouse: Point;
   attractTime: number;
 }
@@ -110,6 +126,41 @@ export class GameRenderer {
     renderer.drawPowerUp(context, powerUp, time);
   }
 
+  static renderHazardPreview(
+    context: CanvasRenderingContext2D,
+    hazard: HazardState,
+    time: number,
+  ): void {
+    const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
+    renderer.drawHazard(context, hazard, time);
+  }
+
+  static renderObjectivePreview(
+    context: CanvasRenderingContext2D,
+    node: ObjectiveNode,
+    time: number,
+  ): void {
+    const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
+    renderer.drawObjectiveNode(context, node, time);
+  }
+
+  static renderMinePreview(
+    context: CanvasRenderingContext2D,
+    mine: ProximityMine,
+    time: number,
+  ): void {
+    const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
+    renderer.drawMine(context, mine, time);
+  }
+
+  static renderArtilleryPreview(
+    context: CanvasRenderingContext2D,
+    strike: ArtilleryStrike,
+  ): void {
+    const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
+    renderer.drawArtilleryStrike(context, strike);
+  }
+
   destroy(): void {
     this.resizeObserver.disconnect();
   }
@@ -143,7 +194,9 @@ export class GameRenderer {
       this.drawAttractScene(context, state);
     } else {
       context.save();
-      context.translate(-camera.x, -camera.y);
+      const shakeX = state.shake > 0 ? Math.sin(state.attractTime * 83) * state.shake : 0;
+      const shakeY = state.shake > 0 ? Math.cos(state.attractTime * 71) * state.shake : 0;
+      context.translate(-camera.x + shakeX, -camera.y + shakeY);
       this.drawBackdrop(context, state.attractTime, WORLD_WIDTH, WORLD_HEIGHT);
       this.drawMission(context, state);
       context.restore();
@@ -164,7 +217,7 @@ export class GameRenderer {
 
   private drawBackdrop(
     context: CanvasRenderingContext2D,
-    attractTime: number,
+    _attractTime: number,
     width: number,
     height: number,
   ): void {
@@ -187,12 +240,11 @@ export class GameRenderer {
     context.strokeStyle = "rgba(140, 255, 192, 0.055)";
     context.lineWidth = 1;
     context.beginPath();
-    const offset = (attractTime * 4) % 32;
-    for (let x = -32 + offset; x <= width + 32; x += 32) {
+    for (let x = 0; x <= width; x += 32) {
       context.moveTo(x, 0);
       context.lineTo(x, height);
     }
-    for (let y = -32 + offset; y <= height + 32; y += 32) {
+    for (let y = 0; y <= height; y += 32) {
       context.moveTo(0, y);
       context.lineTo(width, y);
     }
@@ -234,7 +286,16 @@ export class GameRenderer {
   }
 
   private drawMission(context: CanvasRenderingContext2D, state: RenderState): void {
+    for (const mark of state.trackMarks) this.drawTrackMark(context, mark);
     for (const wall of state.mission.walls) this.drawWall(context, wall);
+    for (const hazard of state.hazards) {
+      if (hazard.active) this.drawHazard(context, hazard, state.attractTime);
+    }
+    for (const node of state.objectiveNodes) {
+      if (node.active) this.drawObjectiveNode(context, node, state.attractTime);
+    }
+    for (const mine of state.mines) this.drawMine(context, mine, state.attractTime);
+    for (const strike of state.artilleryStrikes) this.drawArtilleryStrike(context, strike);
     for (const powerUp of state.powerUps) {
       if (powerUp.active) this.drawPowerUp(context, powerUp, state.attractTime);
     }
@@ -256,6 +317,181 @@ export class GameRenderer {
     }
     for (const particle of state.particles) this.drawParticle(context, particle);
     this.drawCrosshair(context, state.mouse);
+  }
+
+  private drawTrackMark(context: CanvasRenderingContext2D, mark: TrackMark): void {
+    context.save();
+    context.translate(mark.x, mark.y);
+    context.rotate(mark.angle);
+    context.globalAlpha = Math.min(0.26, (mark.life / mark.maxLife) * 0.26);
+    context.strokeStyle = mark.color;
+    context.lineWidth = 2.2;
+    context.setLineDash([2, 2]);
+    context.beginPath();
+    context.moveTo(-5, 0);
+    context.lineTo(5, 0);
+    context.stroke();
+    context.restore();
+  }
+
+  private drawHazard(
+    context: CanvasRenderingContext2D,
+    hazard: HazardState,
+    time: number,
+  ): void {
+    context.save();
+    context.translate(hazard.x, hazard.y);
+    if (hazard.kind === "mud") {
+      context.fillStyle = "rgba(92, 70, 42, 0.32)";
+      context.strokeStyle = "rgba(177, 139, 82, 0.38)";
+      context.lineWidth = 1.2;
+      context.beginPath();
+      context.ellipse(0, 0, hazard.radius, hazard.radius * 0.72, 0.2, 0, TAU);
+      context.fill();
+      context.stroke();
+      for (let index = 0; index < 7; index += 1) {
+        const angle = index * 2.3;
+        context.fillStyle = "rgba(25, 20, 13, 0.28)";
+        context.beginPath();
+        context.arc(Math.cos(angle) * 30, Math.sin(angle) * 21, 4 + index % 3, 0, TAU);
+        context.fill();
+      }
+    } else if (hazard.kind === "barrel") {
+      context.fillStyle = "#39100d";
+      context.strokeStyle = "#ff9b66";
+      context.lineWidth = 1.5;
+      context.fillRect(-10, -14, 20, 28);
+      context.strokeRect(-10, -14, 20, 28);
+      context.fillStyle = "#ff9b66";
+      context.fillRect(-10, -8, 20, 3);
+      context.fillRect(-10, 6, 20, 3);
+      context.font = "bold 10px monospace";
+      context.textAlign = "center";
+      context.fillText("!", 0, 3);
+    } else if (hazard.kind === "minefield") {
+      context.strokeStyle = "rgba(255, 124, 115, 0.52)";
+      context.setLineDash([6, 6]);
+      context.beginPath();
+      context.arc(0, 0, 44, 0, TAU);
+      context.stroke();
+      for (let index = 0; index < 5; index += 1) {
+        const angle = index * TAU / 5 + time * 0.08;
+        context.fillStyle = "#32100e";
+        context.beginPath();
+        context.arc(Math.cos(angle) * 26, Math.sin(angle) * 26, 5, 0, TAU);
+        context.fill();
+      }
+    } else if (hazard.kind === "repair-station") {
+      context.fillStyle = "#09251b";
+      context.strokeStyle = POWER_UP_DEFINITIONS.repair.color;
+      context.lineWidth = 1.5;
+      context.fillRect(-18, -18, 36, 36);
+      context.strokeRect(-18, -18, 36, 36);
+      context.fillStyle = POWER_UP_DEFINITIONS.repair.color;
+      context.fillRect(-3, -11, 6, 22);
+      context.fillRect(-11, -3, 22, 6);
+    } else {
+      context.fillStyle = "#1b211d";
+      context.strokeStyle = "#b9c7be";
+      context.lineWidth = 1.5;
+      context.rotate(Math.PI / 4);
+      context.fillRect(-15, -15, 30, 30);
+      context.strokeRect(-15, -15, 30, 30);
+      context.strokeStyle = "#ffb45f";
+      context.lineWidth = 3;
+      context.beginPath();
+      context.moveTo(-12, -6);
+      context.lineTo(12, -6);
+      context.moveTo(-12, 6);
+      context.lineTo(12, 6);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  private drawObjectiveNode(
+    context: CanvasRenderingContext2D,
+    node: ObjectiveNode,
+    time: number,
+  ): void {
+    context.save();
+    context.translate(node.x, node.y);
+    const color = node.kind === "extract" ? PLAYER_COLOR : node.kind === "uplink" ? "#ffe27a" : "#7bdcff";
+    context.strokeStyle = color;
+    context.fillStyle = "rgba(4, 14, 12, 0.88)";
+    context.lineWidth = 2;
+    context.setLineDash(node.kind === "relay" ? [] : [8, 6]);
+    context.beginPath();
+    context.arc(0, 0, node.kind === "relay" ? 22 : 62, 0, TAU);
+    context.fill();
+    context.stroke();
+    context.setLineDash([]);
+    if (node.kind === "relay") {
+      context.rotate(time * 0.45 + node.id);
+      for (let index = 0; index < 4; index += 1) {
+        context.rotate(Math.PI / 2);
+        context.fillStyle = color;
+        context.fillRect(13, -3, 12, 6);
+      }
+      context.fillStyle = color;
+      context.fillRect(-4, -13, 8, 26);
+      context.fillRect(-13, -4, 26, 8);
+    } else {
+      context.globalAlpha = 0.25 + Math.sin(time * 3) * 0.08;
+      context.fillStyle = color;
+      context.beginPath();
+      context.arc(0, 0, 48, 0, TAU);
+      context.fill();
+    }
+    context.restore();
+  }
+
+  private drawMine(
+    context: CanvasRenderingContext2D,
+    mine: ProximityMine,
+    time: number,
+  ): void {
+    context.save();
+    context.translate(mine.x, mine.y);
+    const color = mine.owner === "player" ? PLAYER_COLOR : ENEMY_COLOR;
+    context.fillStyle = "#080b09";
+    context.strokeStyle = color;
+    context.lineWidth = 1.4;
+    context.beginPath();
+    context.arc(0, 0, 9, 0, TAU);
+    context.fill();
+    context.stroke();
+    context.fillStyle = color;
+    context.globalAlpha = mine.armTime <= 0 ? 0.6 + Math.sin(time * 8) * 0.35 : 0.3;
+    context.beginPath();
+    context.arc(0, 0, 3, 0, TAU);
+    context.fill();
+    context.restore();
+  }
+
+  private drawArtilleryStrike(
+    context: CanvasRenderingContext2D,
+    strike: ArtilleryStrike,
+  ): void {
+    const progress = Math.max(0, 1 - strike.delay / 1.35);
+    context.save();
+    context.translate(strike.x, strike.y);
+    context.strokeStyle = ENEMY_COLOR;
+    context.fillStyle = `rgba(255, 124, 115, ${0.06 + progress * 0.14})`;
+    context.lineWidth = 1.5 + progress * 2;
+    context.setLineDash([7, 5]);
+    context.beginPath();
+    context.arc(0, 0, strike.radius, 0, TAU);
+    context.fill();
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    context.moveTo(-12, 0);
+    context.lineTo(12, 0);
+    context.moveTo(0, -12);
+    context.lineTo(0, 12);
+    context.stroke();
+    context.restore();
   }
 
   private drawPowerUp(
@@ -661,19 +897,24 @@ export class GameRenderer {
   }
 
   private drawTank(context: CanvasRenderingContext2D, tank: Tank, color: string, accent: string): void {
-    const scale = tank.kind === "boss" ? 1.48 : 1;
+    const scale = tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1;
+    const roleAccent = tank.kind === "heavy"
+      ? "#ffb45f"
+      : tank.kind === "minelayer" ? "#f06dff"
+        : tank.kind === "support" ? "#7bdcff"
+          : tank.kind === "artillery" ? "#ffe27a" : accent;
     context.save();
     context.translate(tank.x, tank.y);
     context.rotate(tank.hullAngle);
     context.scale(scale, scale);
-    this.drawTankHull(context, tank.kind, color, accent);
+    this.drawTankHull(context, tank.kind, color, roleAccent);
     context.restore();
 
     context.save();
     context.translate(tank.x, tank.y);
     context.rotate(tank.turretAngle);
     context.scale(scale, scale);
-    this.drawTankTurret(context, tank.kind, color, accent);
+    this.drawTankTurret(context, tank.kind, color, roleAccent);
     context.restore();
   }
 
@@ -685,7 +926,10 @@ export class GameRenderer {
   ): void {
     const isAbrams = kind === "player";
     const isType99 = kind === "boss";
-    const halfLength = isAbrams ? 17 : isType99 ? 17.5 : kind === "scout" ? 16 : 15.5;
+    const halfLength = isAbrams
+      ? 17
+      : isType99 ? 17.5
+        : kind === "heavy" ? 17 : kind === "scout" ? 16 : 15.5;
     const trackOuterY = isAbrams || isType99 ? 15 : 14;
     const exposedTrackInnerY = trackOuterY - 2.3;
     const skirtInnerY = isAbrams || isType99 ? 8.2 : 7.7;
@@ -853,8 +1097,12 @@ export class GameRenderer {
   ): void {
     const isAbrams = kind === "player";
     const isType99 = kind === "boss";
-    const barrelLength = isAbrams ? 29 : isType99 ? 30 : kind === "sniper" ? 29 : 25;
-    const barrelWidth = isType99 ? 2.4 : 2;
+    const barrelLength = isAbrams
+      ? 29
+      : isType99 ? 30
+        : kind === "artillery" ? 34
+          : kind === "heavy" ? 28 : kind === "sniper" ? 29 : 25;
+    const barrelWidth = isType99 || kind === "heavy" || kind === "artillery" ? 2.4 : 2;
 
     context.lineCap = "butt";
     context.strokeStyle = "#020504";
@@ -997,6 +1245,34 @@ export class GameRenderer {
       context.fillStyle = accent;
       context.fillRect(1.5, -5, 3.4, 3.4);
       context.fillRect(7, 2, 2.5, 2.5);
+    }
+
+    if (kind === "heavy") {
+      context.strokeStyle = accent;
+      context.lineWidth = 2.2;
+      context.strokeRect(-12, -7, 5, 14);
+      context.strokeRect(4, -6, 5, 12);
+    } else if (kind === "minelayer") {
+      context.fillStyle = accent;
+      for (const y of [-5, 0, 5]) {
+        context.beginPath();
+        context.arc(-7, y, 1.8, 0, TAU);
+        context.fill();
+      }
+    } else if (kind === "support") {
+      context.fillStyle = accent;
+      context.fillRect(-6, -1, 6, 2);
+      context.fillRect(-4, -3, 2, 6);
+    } else if (kind === "artillery") {
+      context.strokeStyle = accent;
+      context.lineWidth = 1.2;
+      context.beginPath();
+      context.arc(-4, 0, 4.5, 0, TAU);
+      context.moveTo(-10, 0);
+      context.lineTo(2, 0);
+      context.moveTo(-4, -6);
+      context.lineTo(-4, 6);
+      context.stroke();
     }
   }
 

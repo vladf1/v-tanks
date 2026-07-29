@@ -19,7 +19,7 @@
         <strong data-targets></strong>
       </div>
       <div>
-        <span>PROGRESS</span>
+        <span data-objective-label>OBJECTIVE</span>
         <strong data-mission-completion></strong>
       </div>
       <div>
@@ -28,6 +28,8 @@
       </div>
     </div>
     <div class="chrome-actions">
+      <button class="text-icon-button" data-action="motion">MOTION FULL</button>
+      <button class="text-icon-button" data-action="shake">SHAKE ON</button>
       <button class="icon-button" data-action="sound"></button>
       <button class="chrome-button" data-action="pause" hidden>PAUSE</button>
     </div>
@@ -35,14 +37,15 @@
 
   <section class="combat-status combat-status-left" data-combat hidden aria-label="Hull status">
     <span class="status-label">HULL</span>
-    <div class="armor-pips"><i></i><i></i><i></i></div>
+    <div class="armor-pips"></div>
+    <span class="bonus-status" data-bonus-status></span>
   </section>
   <section class="combat-status combat-status-right" data-combat hidden aria-label="Dash charge">
-    <span class="status-label">DASH / SHIFT</span>
+    <span class="status-label">DASH / SHIFT · <span data-utility-status></span></span>
     <div class="dash-track"><i data-dash-charge></i></div>
   </section>
   <section class="boss-readout" data-boss hidden>
-    <span>OMEGA CORE</span>
+    <span>OMEGA CORE<span data-boss-phase></span></span>
     <div><i data-boss-health></i></div>
   </section>
   <section class="powerup-readout" data-powerup-readout hidden aria-label="Active power-ups">
@@ -54,6 +57,7 @@
     <span><kbd>MOUSE</kbd> AIM</span>
     <span><kbd>LMB</kbd> HOLD FIRE</span>
     <span><kbd>SHIFT</kbd> DASH</span>
+    <span><kbd>E</kbd> UTILITY</span>
     <span><kbd>R</kbd> RESTART</span>
   </div>
 
@@ -100,11 +104,35 @@
           <div><dt>HOSTILES</dt><dd data-selected-hostiles></dd></div>
           <div><dt>PAR</dt><dd data-selected-par></dd></div>
           <div><dt>THREAT</dt><dd data-selected-threat></dd></div>
+          <div><dt>OBJECTIVE</dt><dd data-selected-objective></dd></div>
+          <div><dt>BONUS</dt><dd data-selected-bonus></dd></div>
         </dl>
+      </div>
+      <div class="loadout-panel">
+        <div class="loadout-heading">
+          <span>PRE-MISSION LOADOUT</span>
+          <small>SIDEGRADES / NO GRIND</small>
+        </div>
+        <div class="loadout-row">
+          <b>CANNON</b>
+          <div data-loadout-options="cannon"></div>
+        </div>
+        <div class="loadout-row">
+          <b>CHASSIS</b>
+          <div data-loadout-options="chassis"></div>
+        </div>
+        <div class="loadout-row">
+          <b>UTILITY</b>
+          <div data-loadout-options="utility"></div>
+        </div>
       </div>
       <button class="primary-button" data-action="deploy">
         <span>DEPLOY</span>
         <i>→</i>
+      </button>
+      <button class="survival-button" data-action="survival">
+        <span>DAILY SEEDED SURVIVAL</span>
+        <small>BEST <strong data-survival-best>0</strong></small>
       </button>
     </div>
   </section>

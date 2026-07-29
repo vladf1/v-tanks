@@ -1,4 +1,12 @@
-export type EnemyKind = "scout" | "guard" | "sniper" | "boss";
+export type EnemyKind =
+  | "scout"
+  | "guard"
+  | "sniper"
+  | "heavy"
+  | "minelayer"
+  | "support"
+  | "artillery"
+  | "boss";
 
 export interface Point {
   x: number;
@@ -19,6 +27,30 @@ export interface EnemySpawn extends Point {
   kind: EnemyKind;
 }
 
+export type ObjectiveKind = "eliminate" | "relays" | "hold" | "survive" | "omega";
+export type BonusKind = "accuracy" | "hull" | "time" | "ricochet";
+export type HazardKind = "barrel" | "mud" | "minefield" | "repair-station" | "barricade";
+
+export interface ObjectiveSpec {
+  kind: ObjectiveKind;
+  label: string;
+  description: string;
+  targetSeconds: number;
+  positions: Point[];
+}
+
+export interface BonusObjective {
+  kind: BonusKind;
+  label: string;
+  target: number;
+}
+
+export interface HazardSpawn extends Point {
+  id: number;
+  kind: HazardKind;
+  radius: number;
+}
+
 export interface ReinforcementPlan {
   count: number;
   intervalMin: number;
@@ -36,6 +68,9 @@ export interface Mission {
   enemies: EnemySpawn[];
   reinforcements: ReinforcementPlan;
   walls: Wall[];
+  objective: ObjectiveSpec;
+  bonus: BonusObjective;
+  hazards: HazardSpawn[];
 }
 
 export const VIEW_WIDTH = 960;
@@ -63,14 +98,162 @@ export function getCameraPosition(focus: Point): Point {
   };
 }
 
-type MissionTemplate = Omit<Mission, "reinforcements" | "walls"> & {
+type MissionTemplate = Omit<Mission, "reinforcements" | "walls" | "objective" | "bonus" | "hazards"> & {
   walls: Array<Omit<Wall, "kind">>;
 };
+
+const OBJECTIVE_KINDS: ObjectiveKind[] = [
+  "eliminate",
+  "relays",
+  "hold",
+  "survive",
+  "relays",
+  "eliminate",
+  "hold",
+  "survive",
+  "relays",
+  "omega",
+];
+const BONUS_KINDS: BonusKind[] = [
+  "accuracy",
+  "ricochet",
+  "hull",
+  "time",
+  "accuracy",
+  "hull",
+  "ricochet",
+  "time",
+  "accuracy",
+  "hull",
+];
+
+function distanceSquared(first: Point, second: Point): number {
+  const deltaX = first.x - second.x;
+  const deltaY = first.y - second.y;
+  return (deltaX * deltaX) + (deltaY * deltaY);
+}
+
+function findFeaturePositions(
+  mission: Pick<Mission, "player" | "enemies" | "walls">,
+  count: number,
+  offset: number,
+): Point[] {
+  const candidates: Point[] = [];
+  for (let y = 150; y <= WORLD_HEIGHT - 150; y += 150) {
+    for (let x = 150; x <= WORLD_WIDTH - 150; x += 170) {
+      candidates.push({ x, y });
+    }
+  }
+  candidates.sort((first, second) => {
+    const firstScore = noiseScore(first, offset);
+    const secondScore = noiseScore(second, offset);
+    return firstScore - secondScore;
+  });
+
+  const placed: Point[] = [];
+  for (const candidate of candidates) {
+    if (mission.walls.some((wall) => isPointInExpandedWall(candidate, wall, 62))) continue;
+    if ([mission.player, ...mission.enemies].some((spawn) => (
+      distanceSquared(candidate, spawn) < 150 * 150
+    ))) continue;
+    if (placed.some((point) => distanceSquared(candidate, point) < 230 * 230)) continue;
+    placed.push(candidate);
+    if (placed.length === count) break;
+  }
+  return placed;
+}
+
+function noiseScore(point: Point, seed: number): number {
+  const value = Math.sin(point.x * 0.013 + point.y * 0.019 + seed * 4.17) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function createObjective(
+  mission: Pick<Mission, "player" | "enemies" | "walls">,
+  missionIndex: number,
+): ObjectiveSpec {
+  const kind = OBJECTIVE_KINDS[missionIndex] ?? "eliminate";
+  const relayCount = missionIndex >= 8 ? 4 : missionIndex >= 4 ? 3 : 2;
+  const positions = findFeaturePositions(
+    mission,
+    kind === "relays" ? relayCount : kind === "omega" ? 3 : kind === "hold" ? 1 : 0,
+    missionIndex + 31,
+  );
+  if (kind === "relays") {
+    return {
+      kind,
+      label: "DISABLE RELAYS",
+      description: `Destroy all ${relayCount} command relays. Hostiles are secondary.`,
+      targetSeconds: 0,
+      positions,
+    };
+  }
+  if (kind === "hold") {
+    const seconds = missionIndex >= 6 ? 42 : 32;
+    return {
+      kind,
+      label: "HOLD UPLINK",
+      description: `Occupy the uplink for ${seconds} seconds under fire.`,
+      targetSeconds: seconds,
+      positions,
+    };
+  }
+  if (kind === "survive") {
+    const seconds = missionIndex >= 7 ? 105 : 78;
+    return {
+      kind,
+      label: "SURVIVE",
+      description: `Remain operational for ${seconds} seconds.`,
+      targetSeconds: seconds,
+      positions: [],
+    };
+  }
+  if (kind === "omega") {
+    return {
+      kind,
+      label: "BREAK THE OMEGA CORE",
+      description: "Destroy both shield generators, eliminate the Core, then extract.",
+      targetSeconds: 0,
+      positions,
+    };
+  }
+  return {
+    kind,
+    label: "CLEAR THE ARENA",
+    description: "Eliminate every hostile tank.",
+    targetSeconds: 0,
+    positions: [],
+  };
+}
+
+function createBonus(missionIndex: number): BonusObjective {
+  const kind = BONUS_KINDS[missionIndex] ?? "accuracy";
+  if (kind === "accuracy") return { kind, label: "Maintain 65% accuracy", target: 65 };
+  if (kind === "hull") return { kind, label: "Finish with at least 2 hull", target: 2 };
+  if (kind === "time") return { kind, label: "Beat the operation par time", target: 1 };
+  return { kind, label: "Score 5 ricochet hits", target: 5 };
+}
+
+function createHazards(
+  mission: Pick<Mission, "player" | "enemies" | "walls">,
+  missionIndex: number,
+): HazardSpawn[] {
+  if (missionIndex < 1) return [];
+  const count = Math.min(7, 2 + Math.floor(missionIndex / 2));
+  const positions = findFeaturePositions(mission, count, missionIndex + 83);
+  const kinds: HazardKind[] = ["barrel", "mud", "minefield", "repair-station", "barricade"];
+  return positions.map((position, index) => ({
+    ...position,
+    id: missionIndex * 10 + index,
+    kind: kinds[(missionIndex + index) % kinds.length],
+    radius: kinds[(missionIndex + index) % kinds.length] === "mud" ? 58 : 20,
+  }));
+}
 
 function expandMission(mission: MissionTemplate, missionIndex: number): Mission {
   const wallKindOffset = Number.parseInt(mission.number, 10) % WALL_KINDS.length;
   const reinforcementCount = REINFORCEMENT_COUNTS[missionIndex];
-  return {
+  const expanded = {
     ...mission,
     parTime: Math.round(
       (mission.parTime * PAR_TIME_SCALE)
@@ -80,8 +263,9 @@ function expandMission(mission: MissionTemplate, missionIndex: number): Mission 
       x: mission.player.x * ARENA_SCALE,
       y: mission.player.y * ARENA_SCALE,
     },
-    enemies: mission.enemies.map((enemy) => ({
+    enemies: mission.enemies.map((enemy, index) => ({
       ...enemy,
+      kind: upgradeEnemyKind(enemy.kind, missionIndex, index),
       x: enemy.x * ARENA_SCALE,
       y: enemy.y * ARENA_SCALE,
     })),
@@ -99,6 +283,27 @@ function expandMission(mission: MissionTemplate, missionIndex: number): Mission 
       kind: WALL_KINDS[(wallKindOffset + index) % WALL_KINDS.length],
     })),
   };
+  return {
+    ...expanded,
+    objective: createObjective(expanded, missionIndex),
+    bonus: createBonus(missionIndex),
+    hazards: createHazards(expanded, missionIndex),
+  };
+}
+
+function upgradeEnemyKind(
+  kind: EnemyKind,
+  missionIndex: number,
+  enemyIndex: number,
+): EnemyKind {
+  if (kind === "boss" || missionIndex < 3) return kind;
+  if (enemyIndex === 0 && missionIndex >= 3 && missionIndex <= 6) {
+    return (["heavy", "minelayer", "support", "artillery"] as EnemyKind[])[missionIndex - 3];
+  }
+  const cycle: EnemyKind[] = ["heavy", "minelayer", "support", "artillery"];
+  const specialFrequency = missionIndex >= 7 ? 4 : 6;
+  if ((enemyIndex + missionIndex) % specialFrequency !== 0) return kind;
+  return cycle[(missionIndex + enemyIndex) % cycle.length];
 }
 
 export function getMissionEnemyTotal(mission: Mission): number {
