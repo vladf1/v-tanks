@@ -44,6 +44,18 @@ import {
   getChassisStats,
   type Loadout,
 } from "./loadouts";
+import {
+  VISUAL_CAPS,
+  VISUAL_THEMES,
+  WRECK_FADE_SECONDS,
+  WRECK_SOLID_SECONDS,
+  generateEnvironmentalDetails,
+  getAdmittedParticleCount,
+  pushCapped,
+  type Decal,
+  type ParticleKind,
+  type Wreck,
+} from "./visual-state.ts";
 
 export type GamePhase = "menu" | "playing" | "paused" | "victory" | "defeat";
 export type GameMode = "campaign" | "survival";
@@ -90,6 +102,14 @@ export interface Tank extends Point {
   patrolAngle: number;
   strafeDirection: number;
   trackCooldown: number;
+  recoil: number;
+  recoilTime: number;
+  recoilDuration: number;
+  chassisKick: number;
+  damageFlash: number;
+  lastHitDirection: number;
+  smokeIntensity: number;
+  smokeCooldown: number;
 }
 
 export interface Projectile extends Point {
@@ -107,12 +127,15 @@ export interface Projectile extends Point {
 }
 
 export interface Particle extends Point {
+  kind: ParticleKind;
   velocityX: number;
   velocityY: number;
   life: number;
   maxLife: number;
   size: number;
   color: string;
+  angle: number;
+  critical?: boolean;
 }
 
 export interface ObjectiveNode extends Point {
@@ -147,6 +170,9 @@ export interface TrackMark extends Point {
   life: number;
   maxLife: number;
   color: string;
+  width: number;
+  faction: "player" | "enemy";
+  critical?: boolean;
 }
 
 export interface FeedbackSettings {
@@ -375,6 +401,9 @@ export class TankGame {
   private mines: ProximityMine[] = [];
   private artilleryStrikes: ArtilleryStrike[] = [];
   private trackMarks: TrackMark[] = [];
+  private decals: Decal[] = [];
+  private wrecks: Wreck[] = [];
+  private nextDecalId = 1;
   private holdProgress = 0;
   private ricochetHits = 0;
   private score = 0;
@@ -474,6 +503,9 @@ export class TankGame {
     this.mines = [];
     this.artilleryStrikes = [];
     this.trackMarks = [];
+    this.decals = generateEnvironmentalDetails(this.mission);
+    this.wrecks = [];
+    this.nextDecalId = 1;
     this.hazards = this.mission.hazards.map((hazard) => ({
       ...hazard,
       active: true,
@@ -540,6 +572,14 @@ export class TankGame {
       patrolAngle: 0,
       strafeDirection: 1,
       trackCooldown: 0,
+      recoil: 0,
+      recoilTime: 0,
+      recoilDuration: 0,
+      chassisKick: 0,
+      damageFlash: 0,
+      lastHitDirection: 0,
+      smokeIntensity: 0,
+      smokeCooldown: 0,
     };
   }
 
@@ -564,6 +604,14 @@ export class TankGame {
       patrolAngle: (id * 1.73) % TAU,
       strafeDirection: seededDirection(id),
       trackCooldown: 0,
+      recoil: 0,
+      recoilTime: 0,
+      recoilDuration: 0,
+      chassisKick: 0,
+      damageFlash: 0,
+      lastHitDirection: 0,
+      smokeIntensity: 0,
+      smokeCooldown: 0,
     };
   }
 
@@ -585,6 +633,11 @@ export class TankGame {
       this.updateParticles(delta);
     }
 
+    this.canvas.dataset.visualTheme = this.mission.visualTheme;
+    this.canvas.dataset.particleCount = String(this.particles.length);
+    this.canvas.dataset.trackCount = String(this.trackMarks.length);
+    this.canvas.dataset.decalCount = String(this.decals.length);
+    this.canvas.dataset.wreckCount = String(this.wrecks.length);
     this.renderer.render({
       phase: this.phase,
       mission: this.mission,
@@ -599,6 +652,10 @@ export class TankGame {
       mines: this.mines,
       artilleryStrikes: this.artilleryStrikes,
       trackMarks: this.trackMarks,
+      decals: this.decals,
+      wrecks: this.wrecks,
+      theme: VISUAL_THEMES[this.mission.visualTheme],
+      reducedMotion: this.feedback.reducedMotion,
       shake: this.feedback.cameraShake && !this.feedback.reducedMotion ? this.shake : 0,
       mouse: this.mouse,
       attractTime: this.attractTime,
@@ -702,6 +759,9 @@ export class TankGame {
     this.updateMines(delta);
     this.updateArtillery(delta);
     this.updateTrackMarks(delta);
+    this.updateDecals(delta);
+    this.updateWrecks(delta);
+    this.updateTankVisualStates(delta);
     this.updateObjective(delta);
     this.updateParticles(delta);
 
@@ -747,7 +807,7 @@ export class TankGame {
         * getPlayerSpeedMultiplier(this.activePowerUps)
         * (inMud ? 0.58 : 1);
       this.moveTank(this.player, movementX * speed * delta, movementY * speed * delta);
-      this.updateTankTracks(this.player, delta, "#496258", 0.09);
+      this.updateTankTracks(this.player, delta, this.getTrackColor("player"), 0.09);
     }
     if (this.pointerClient) {
       this.mouse = this.renderer.clientToWorld(
@@ -801,7 +861,7 @@ export class TankGame {
       if (speed > 0) {
         enemy.hullAngle = turnTowards(enemy.hullAngle, moveAngle, delta * 3.8);
         this.moveTank(enemy, Math.cos(moveAngle) * speed * delta, Math.sin(moveAngle) * speed * delta);
-        this.updateTankTracks(enemy, delta, "#4b3431", 0.14);
+        this.updateTankTracks(enemy, delta, this.getTrackColor("enemy"), 0.14);
       }
 
       const aimDifference = Math.abs(normalizeAngle(targetAngle - enemy.turretAngle));
@@ -996,6 +1056,14 @@ export class TankGame {
     bounces: number,
     damage: number,
   ): void {
+    const heavyShot = tank.kind === "boss"
+      || tank.kind === "heavy"
+      || tank.kind === "artillery"
+      || damage > 1;
+    tank.recoil = heavyShot ? 6.5 : 4;
+    tank.recoilDuration = heavyShot ? 0.13 : 0.09;
+    tank.recoilTime = tank.recoilDuration;
+    tank.chassisKick = this.feedback.reducedMotion ? 0 : 1.5;
     const muzzle = tank.radius + 15;
     const x = tank.x + Math.cos(angle) * muzzle;
     const y = tank.y + Math.sin(angle) * muzzle;
@@ -1037,8 +1105,10 @@ export class TankGame {
     this.player.dashCooldown = this.loadout.utility === "dash" ? 2.6 : 3.8;
     this.player.invulnerable = Math.max(this.player.invulnerable, 0.28);
     for (let step = 0; step < 8; step += 1) this.moveTank(this.player, dx * 9, dy * 9);
-    for (let index = 0; index < 12; index += 1) {
-      this.particles.push({
+    const dashDustCount = getAdmittedParticleCount("dust", 12, this.feedback.reducedMotion);
+    for (let index = 0; index < dashDustCount; index += 1) {
+      this.addParticle({
+        kind: "dust",
         x: this.player.x - dx * 12,
         y: this.player.y - dy * 12,
         velocityX: -dx * (80 + Math.random() * 90) + (Math.random() - 0.5) * 55,
@@ -1047,6 +1117,7 @@ export class TankGame {
         maxLife: 0.54,
         size: 1.4 + Math.random() * 2.3,
         color: PLAYER_COLOR,
+        angle: Math.atan2(-dy, -dx),
       });
     }
     this.audio.dash();
@@ -1076,12 +1147,24 @@ export class TankGame {
     const remaining: Projectile[] = [];
     for (const projectile of this.projectiles) {
       projectile.life -= delta;
-      if (projectile.life <= 0) continue;
+      if (projectile.life <= 0) {
+        this.spawnImpactParticles(
+          projectile.x,
+          projectile.y,
+          VISUAL_THEMES[this.mission.visualTheme].dustTint,
+          4,
+          Math.atan2(projectile.velocityY, projectile.velocityX),
+          "dust",
+        );
+        this.addDecal("scorch", projectile.x, projectile.y, 5);
+        continue;
+      }
       projectile.previousX = projectile.x;
       projectile.previousY = projectile.y;
       let nextX = projectile.x + projectile.velocityX * delta;
       let nextY = projectile.y + projectile.velocityY * delta;
       let bounced = false;
+      let bouncedOnWall = false;
 
       if (nextX <= 11 || nextX >= WORLD_WIDTH - 11) {
         projectile.velocityX *= -1;
@@ -1117,13 +1200,41 @@ export class TankGame {
         nextX = projectile.x;
         nextY = projectile.y;
         bounced = true;
+        bouncedOnWall = true;
         break;
       }
 
       if (bounced) {
         projectile.bounces -= 1;
         projectile.ricocheted = true;
-        this.spawnImpactParticles(projectile.x, projectile.y, projectile.color, 4);
+        const reflectedDirection = Math.atan2(projectile.velocityY, projectile.velocityX);
+        this.spawnImpactParticles(
+          projectile.x,
+          projectile.y,
+          bouncedOnWall ? "#fff0b4" : projectile.color,
+          bouncedOnWall ? 7 : 4,
+          reflectedDirection,
+          "spark",
+        );
+        if (bouncedOnWall) {
+          this.spawnImpactParticles(
+            projectile.x,
+            projectile.y,
+            "#c7c2b8",
+            4,
+            reflectedDirection,
+            "debris",
+          );
+          this.spawnImpactParticles(
+            projectile.x,
+            projectile.y,
+            VISUAL_THEMES[this.mission.visualTheme].dustTint,
+            5,
+            reflectedDirection + Math.PI,
+            "dust",
+          );
+          this.addDecal("wall-chip", projectile.x, projectile.y, 7, "#c4beb0", reflectedDirection);
+        }
         if (projectile.bounces < 0) continue;
       }
 
@@ -1145,7 +1256,10 @@ export class TankGame {
         && this.player.invulnerable <= 0
         && segmentDistanceSquared(projectile, { x: projectile.previousX, y: projectile.previousY }, this.player) <= radius * radius
       ) {
-        this.damagePlayer(projectile.damage);
+        this.damagePlayer(
+          projectile.damage,
+          Math.atan2(projectile.y - this.player.y, projectile.x - this.player.x),
+        );
         return true;
       }
       return false;
@@ -1159,14 +1273,30 @@ export class TankGame {
         enemy.kind === "boss"
         && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
       ) {
-        this.spawnImpactParticles(projectile.x, projectile.y, "#7bdcff", 12);
+        this.spawnImpactParticles(
+          projectile.x,
+          projectile.y,
+          "#7bdcff",
+          12,
+          Math.atan2(projectile.velocityY, projectile.velocityX) + Math.PI,
+          "spark",
+        );
+        this.spawnShieldArc(projectile.x, projectile.y, "#7bdcff");
         this.shake = Math.max(this.shake, 0.8);
         return true;
       }
       if (enemy.kind === "heavy") {
         const impactAngle = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
         if (Math.abs(normalizeAngle(impactAngle - enemy.hullAngle)) < 1.05) {
-          this.spawnImpactParticles(projectile.x, projectile.y, "#a7b5ad", 8);
+          this.spawnImpactParticles(
+            projectile.x,
+            projectile.y,
+            "#fff0b4",
+            10,
+            Math.atan2(projectile.velocityY, projectile.velocityX) + Math.PI,
+          );
+          enemy.damageFlash = 0.1;
+          enemy.lastHitDirection = impactAngle;
           return true;
         }
       }
@@ -1178,27 +1308,52 @@ export class TankGame {
       ));
       if (supportingTank) {
         supportingTank.hp -= 1;
+        supportingTank.damageFlash = 0.12;
+        supportingTank.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
         this.spawnImpactParticles(enemy.x, enemy.y, "#7bdcff", 10);
+        this.spawnShieldArc(enemy.x, enemy.y, "#7bdcff");
         if (supportingTank.hp <= 0) {
           supportingTank.alive = false;
+          this.recordWreck(supportingTank);
           this.score += 160;
-          this.spawnExplosion(supportingTank.x, supportingTank.y, 24, ENEMY_COLOR);
+          this.spawnExplosion(
+            supportingTank.x,
+            supportingTank.y,
+            24,
+            ENEMY_COLOR,
+            WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+          );
         }
         return true;
       }
       enemy.hp -= projectile.damage;
+      enemy.damageFlash = 0.12;
+      enemy.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
       this.hits += 1;
       if (projectile.ricocheted) this.ricochetHits += 1;
-      this.spawnImpactParticles(projectile.x, projectile.y, projectile.color, 8);
+      this.spawnImpactParticles(
+        projectile.x,
+        projectile.y,
+        "#fff0b4",
+        8,
+        Math.atan2(projectile.velocityY, projectile.velocityX) + Math.PI,
+      );
       this.audio.impact();
       if (enemy.hp <= 0) {
         enemy.alive = false;
+        this.recordWreck(enemy);
         this.score += enemy.kind === "boss"
           ? 2500
           : enemy.kind === "heavy" || enemy.kind === "artillery" ? 260 : 100;
         this.shake = Math.max(this.shake, enemy.kind === "boss" ? 4 : 1.6);
         this.hitStop = enemy.kind === "boss" ? 0.11 : 0.045;
-        this.spawnExplosion(enemy.x, enemy.y, enemy.kind === "boss" ? 42 : 22, ENEMY_COLOR);
+        this.spawnExplosion(
+          enemy.x,
+          enemy.y,
+          enemy.kind === "boss" ? 42 : 22,
+          ENEMY_COLOR,
+          WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+        );
       }
       return true;
     }
@@ -1248,6 +1403,7 @@ export class TankGame {
         this.detonate(hazard.x, hazard.y, 96, "player");
       } else {
         this.spawnExplosion(hazard.x, hazard.y, 24, "#b9c7be");
+        this.addDecal("rubble", hazard.x, hazard.y, 24, "#777b73");
         this.score += 25;
       }
       return true;
@@ -1313,16 +1469,24 @@ export class TankGame {
         this.damagePlayer(2);
       }
       this.spawnExplosion(strike.x, strike.y, strike.radius * 0.38, ENEMY_ACCENT);
+      this.addDecal("crater", strike.x, strike.y, strike.radius * 0.62);
       this.shake = Math.max(this.shake, 3);
     }
     this.artilleryStrikes = remaining;
   }
 
   private updateTrackMarks(delta: number): void {
-    this.trackMarks = this.trackMarks.filter((mark) => {
-      mark.life -= delta;
-      return mark.life > 0;
-    });
+    for (const mark of this.trackMarks) mark.life = Math.max(0, mark.life - delta * 0.015);
+  }
+
+  private getTrackColor(faction: "player" | "enemy"): string {
+    if (this.mission.visualTheme === "industrial") {
+      return faction === "player" ? "#46534f" : "#493b37";
+    }
+    if (this.mission.visualTheme === "command-complex") {
+      return faction === "player" ? "#3e5b53" : "#49302f";
+    }
+    return faction === "player" ? "#496258" : "#4b3431";
   }
 
   private updateTankTracks(
@@ -1336,16 +1500,18 @@ export class TankGame {
     tank.trackCooldown = this.feedback.reducedMotion ? interval * 2 : interval;
     const scale = tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1;
     for (const side of [-1, 1]) {
-      this.trackMarks.push({
+      pushCapped(this.trackMarks, {
         x: tank.x - Math.cos(tank.hullAngle) * 12 * scale
           + Math.cos(tank.hullAngle + Math.PI / 2) * side * 10 * scale,
         y: tank.y - Math.sin(tank.hullAngle) * 12 * scale
           + Math.sin(tank.hullAngle + Math.PI / 2) * side * 10 * scale,
         angle: tank.hullAngle,
-        life: 5,
-        maxLife: 5,
+        life: 1,
+        maxLife: 1,
         color,
-      });
+        width: 2.2 * scale,
+        faction: tank.kind === "player" ? "player" : "enemy",
+      }, VISUAL_CAPS.trackMarks);
     }
   }
 
@@ -1444,6 +1610,7 @@ export class TankGame {
     owner: "player" | "enemy",
   ): void {
     this.spawnExplosion(x, y, radius * 0.38, owner === "player" ? "#ffb45f" : ENEMY_ACCENT);
+    this.addDecal("mine-crater", x, y, radius * 0.34);
     this.shake = Math.max(this.shake, 3);
     if (owner === "enemy" && distanceSquared(this.player, { x, y }) < radius * radius) {
       this.damagePlayer(1);
@@ -1458,35 +1625,170 @@ export class TankGame {
         enemy.hp -= 2;
         if (enemy.hp <= 0) {
           enemy.alive = false;
+          this.recordWreck(enemy);
           this.score += 120;
-          this.spawnExplosion(enemy.x, enemy.y, 22, ENEMY_COLOR);
+          this.spawnExplosion(
+            enemy.x,
+            enemy.y,
+            22,
+            ENEMY_COLOR,
+            WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+          );
         }
       }
     }
   }
 
-  private damagePlayer(damage: number): void {
+  private damagePlayer(damage: number, hitDirection = this.player.hullAngle + Math.PI): void {
     const remainingDamage = absorbShieldDamage(this.activePowerUps, damage);
     if (remainingDamage < damage) {
       this.player.invulnerable = 0.24;
+      this.player.damageFlash = 0.12;
+      this.player.lastHitDirection = hitDirection;
       this.spawnImpactParticles(
         this.player.x,
         this.player.y,
         POWER_UP_DEFINITIONS.shield.color,
         12,
       );
+      this.spawnShieldArc(this.player.x, this.player.y, POWER_UP_DEFINITIONS.shield.color);
       this.audio.impact();
       if (remainingDamage <= 0) return;
     }
 
     this.player.hp -= remainingDamage;
+    this.player.damageFlash = 0.12;
+    this.player.lastHitDirection = hitDirection;
+    this.spawnImpactParticles(
+      this.player.x,
+      this.player.y,
+      "#fff0b4",
+      8,
+      hitDirection + Math.PI,
+    );
     this.shake = Math.max(this.shake, 2.2);
     this.player.invulnerable = 0.86;
-    this.spawnExplosion(this.player.x, this.player.y, 18, PLAYER_COLOR);
+    const wreckDecalLife = this.player.hp <= 0
+      ? WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS
+      : undefined;
+    this.spawnExplosion(this.player.x, this.player.y, 18, PLAYER_COLOR, wreckDecalLife);
     this.audio.impact();
     if (this.player.hp <= 0) {
       this.player.alive = false;
-      this.spawnExplosion(this.player.x, this.player.y, 36, PLAYER_ACCENT);
+      this.recordWreck(this.player);
+      this.spawnExplosion(
+        this.player.x,
+        this.player.y,
+        36,
+        PLAYER_ACCENT,
+        WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+      );
+    }
+  }
+
+  private addParticle(particle: Particle): void {
+    pushCapped(this.particles, particle, VISUAL_CAPS.particles);
+  }
+
+  private addDecal(
+    kind: Decal["kind"],
+    x: number,
+    y: number,
+    size: number,
+    color?: string,
+    angle = Math.random() * TAU,
+    life?: number,
+  ): void {
+    const palette = VISUAL_THEMES[this.mission.visualTheme].decalPalette;
+    pushCapped(this.decals, {
+      id: this.nextDecalId,
+      kind,
+      x,
+      y,
+      angle,
+      size,
+      opacity: 0.34 + Math.random() * 0.24,
+      color: color ?? palette[this.nextDecalId % palette.length],
+      life,
+    }, VISUAL_CAPS.decals);
+    this.nextDecalId += 1;
+  }
+
+  private recordWreck(tank: Tank): void {
+    if (this.wrecks.some((wreck) => wreck.id === tank.id && wreck.faction === (
+      tank.kind === "player" ? "player" : "enemy"
+    ))) return;
+    pushCapped(this.wrecks, {
+      id: tank.id,
+      kind: tank.kind,
+      x: tank.x,
+      y: tank.y,
+      hullAngle: tank.hullAngle,
+      turretAngle: tank.turretAngle,
+      scale: tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1,
+      faction: tank.kind === "player" ? "player" : "enemy",
+      burn: tank.kind === "boss" ? 1 : 0.55,
+      life: WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+    }, VISUAL_CAPS.wrecks);
+    this.addDecal(
+      "oil",
+      tank.x - 4,
+      tank.y + 4,
+      tank.radius * 1.5,
+      "#090b0a",
+      Math.random() * TAU,
+      WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+    );
+  }
+
+  private updateDecals(delta: number): void {
+    this.decals = this.decals.filter((decal) => {
+      if (decal.life === undefined) return true;
+      decal.life -= delta;
+      return decal.life > 0;
+    });
+  }
+
+  private updateWrecks(delta: number): void {
+    this.wrecks = this.wrecks.filter((wreck) => {
+      wreck.life -= delta;
+      return wreck.life > 0;
+    });
+  }
+
+  private updateTankVisualStates(delta: number): void {
+    for (const tank of [this.player, ...this.enemies]) {
+      tank.recoilTime = Math.max(0, tank.recoilTime - delta);
+      tank.chassisKick = Math.max(0, tank.chassisKick - delta * 14);
+      tank.damageFlash = Math.max(0, tank.damageFlash - delta);
+      const healthRatio = tank.maxHp > 0 ? tank.hp / tank.maxHp : 0;
+      tank.smokeIntensity = healthRatio < 0.25 ? 0.9 : healthRatio < 0.5 ? 0.36 : 0;
+      if (!tank.alive || tank.smokeIntensity <= 0) continue;
+      tank.smokeCooldown -= delta;
+      if (tank.smokeCooldown > 0) continue;
+      tank.smokeCooldown = tank.smokeIntensity > 0.5 ? 0.09 : 0.24;
+      const smokeCount = getAdmittedParticleCount(
+        "smoke",
+        tank.smokeIntensity > 0.5 ? 2 : 1,
+        this.feedback.reducedMotion,
+      );
+      for (let index = 0; index < smokeCount; index += 1) {
+        this.addParticle({
+          kind: "smoke",
+          x: tank.x + (Math.random() - 0.5) * tank.radius,
+          y: tank.y + (Math.random() - 0.5) * tank.radius,
+          velocityX: (Math.random() - 0.5) * 12,
+          velocityY: -8 - Math.random() * 12,
+          life: 0.85 + Math.random() * 0.75,
+          maxLife: 1.6,
+          size: 4 + Math.random() * 5,
+          color: tank.smokeIntensity > 0.5 ? "#151918" : "#38403d",
+          angle: 0,
+        });
+      }
+      if (Math.random() < 0.22) {
+        this.spawnImpactParticles(tank.x, tank.y, "#ffca78", 2, tank.turretAngle + Math.PI);
+      }
     }
   }
 
@@ -1496,7 +1798,9 @@ export class TankGame {
       if (particle.life <= 0) return false;
       particle.x += particle.velocityX * delta;
       particle.y += particle.velocityY * delta;
-      const damping = Math.exp(-4.5 * delta);
+      if (particle.kind === "smoke") particle.size += delta * 7;
+      if (particle.kind === "ring") particle.size += delta * 58;
+      const damping = Math.exp(-(particle.kind === "smoke" ? 1.35 : 4.5) * delta);
       particle.velocityX *= damping;
       particle.velocityY *= damping;
       return true;
@@ -1504,10 +1808,24 @@ export class TankGame {
   }
 
   private spawnMuzzleParticles(x: number, y: number, angle: number, color: string): void {
+    this.addParticle({
+      kind: "flash",
+      x,
+      y,
+      velocityX: 0,
+      velocityY: 0,
+      life: 0.075,
+      maxLife: 0.075,
+      size: 7,
+      color: "#fff4c2",
+      angle,
+      critical: true,
+    });
     for (let index = 0; index < 5; index += 1) {
       const direction = angle + (Math.random() - 0.5) * 0.7;
       const speed = 55 + Math.random() * 115;
-      this.particles.push({
+      this.addParticle({
+        kind: "spark",
         x,
         y,
         velocityX: Math.cos(direction) * speed,
@@ -1516,15 +1834,27 @@ export class TankGame {
         maxLife: 0.24,
         size: 1.3 + Math.random() * 2,
         color,
+        angle: direction,
       });
     }
   }
 
-  private spawnImpactParticles(x: number, y: number, color: string, count: number): void {
-    for (let index = 0; index < count; index += 1) {
-      const angle = Math.random() * TAU;
+  private spawnImpactParticles(
+    x: number,
+    y: number,
+    color: string,
+    count: number,
+    direction?: number,
+    kind: ParticleKind = "spark",
+  ): void {
+    const admitted = getAdmittedParticleCount(kind, count, this.feedback.reducedMotion);
+    for (let index = 0; index < admitted; index += 1) {
+      const angle = direction === undefined
+        ? Math.random() * TAU
+        : direction + (Math.random() - 0.5) * 0.78;
       const speed = 45 + Math.random() * 145;
-      this.particles.push({
+      this.addParticle({
+        kind,
         x,
         y,
         velocityX: Math.cos(angle) * speed,
@@ -1533,25 +1863,95 @@ export class TankGame {
         maxLife: 0.48,
         size: 1 + Math.random() * 2.4,
         color,
+        angle,
       });
     }
   }
 
-  private spawnExplosion(x: number, y: number, size: number, color: string): void {
-    const count = Math.round(size * 0.8);
-    for (let index = 0; index < count; index += 1) {
-      const angle = Math.random() * TAU;
-      const speed = 45 + Math.random() * (size * 8);
-      this.particles.push({
-        x: x + (Math.random() - 0.5) * size * 0.35,
-        y: y + (Math.random() - 0.5) * size * 0.35,
-        velocityX: Math.cos(angle) * speed,
-        velocityY: Math.sin(angle) * speed,
-        life: 0.35 + Math.random() * 0.55,
-        maxLife: 0.9,
-        size: 1.5 + Math.random() * (size * 0.15),
-        color: index % 4 === 0 ? "#fff7d1" : color,
+  private spawnShieldArc(x: number, y: number, color: string): void {
+    this.addParticle({
+      kind: "flash",
+      x,
+      y,
+      velocityX: 0,
+      velocityY: 0,
+      life: 0.16,
+      maxLife: 0.16,
+      size: 18,
+      color,
+      angle: Math.random() * TAU,
+      critical: true,
+    });
+  }
+
+  private spawnExplosion(
+    x: number,
+    y: number,
+    size: number,
+    color: string,
+    decalLife?: number,
+  ): void {
+    this.addParticle({
+      kind: "flash",
+      x,
+      y,
+      velocityX: 0,
+      velocityY: 0,
+      life: 0.1,
+      maxLife: 0.1,
+      size: size * 0.7,
+      color: "#fff7d1",
+      angle: 0,
+      critical: true,
+    });
+    if (!this.feedback.reducedMotion) {
+      this.addParticle({
+        kind: "ring",
+        x,
+        y,
+        velocityX: 0,
+        velocityY: 0,
+        life: 0.24,
+        maxLife: 0.24,
+        size: size * 0.32,
+        color,
+        angle: 0,
       });
+    }
+
+    const debrisCount = Math.round(size * 0.48);
+    this.spawnImpactParticles(x, y, color, debrisCount, undefined, "debris");
+    const smokeCount = getAdmittedParticleCount(
+      "smoke",
+      Math.max(4, Math.round(size * 0.28)),
+      this.feedback.reducedMotion,
+    );
+    for (let index = 0; index < smokeCount; index += 1) {
+      const angle = Math.random() * TAU;
+      const speed = 12 + Math.random() * size * 1.8;
+      this.addParticle({
+        kind: "smoke",
+        x: x + (Math.random() - 0.5) * size * 0.42,
+        y: y + (Math.random() - 0.5) * size * 0.42,
+        velocityX: Math.cos(angle) * speed,
+        velocityY: Math.sin(angle) * speed - 8,
+        life: 0.7 + Math.random() * 0.85,
+        maxLife: 1.55,
+        size: 2.2 + Math.random() * size * 0.14,
+        color: index % 4 === 0 ? "#555c57" : "#242927",
+        angle,
+      });
+    }
+    if (size >= 18) {
+      this.addDecal(
+        size >= 30 ? "crater" : "scorch",
+        x,
+        y,
+        size * 0.8,
+        undefined,
+        Math.random() * TAU,
+        decalLife,
+      );
     }
   }
 

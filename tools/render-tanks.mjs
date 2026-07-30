@@ -17,6 +17,7 @@ const TANK_KINDS = [
   "artillery",
   "boss",
 ];
+const DAMAGE_TANK_KINDS = ["player", "scout", "heavy", "support", "artillery", "boss"];
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const OUTPUT_DIR = path.resolve(PROJECT_ROOT, "artifacts", "tanks");
@@ -122,9 +123,13 @@ try {
     throw new Error("Vite did not expose a local TCP address.");
   }
 
-  for (const kind of TANK_KINDS) {
-    const url = `http://127.0.0.1:${address.port}/tools/tank-renderer.html?kind=${kind}`;
-    const outputPath = path.join(OUTPUT_DIR, `${kind}.png`);
+  const captures = [
+    ...TANK_KINDS.map((kind) => ({ kind, damage: false })),
+    ...DAMAGE_TANK_KINDS.map((kind) => ({ kind, damage: true })),
+  ];
+  for (const { kind, damage } of captures) {
+    const url = `http://127.0.0.1:${address.port}/tools/tank-renderer.html?kind=${kind}${damage ? "&damage=1" : ""}`;
+    const outputPath = path.join(OUTPUT_DIR, `${kind}${damage ? "-damaged" : ""}.png`);
     await captureWithChrome(chromePath, profileDir, url, outputPath);
     console.log(`Rendered ${path.relative(PROJECT_ROOT, outputPath)}`);
   }

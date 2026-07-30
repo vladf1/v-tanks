@@ -132,6 +132,7 @@
       };
 
       const requestedKind = new URLSearchParams(window.location.search).get("kind") ?? "player";
+      const damageState = new URLSearchParams(window.location.search).get("damage") === "1";
       const variant = variants[requestedKind];
       if (!variant) throw new Error(`Unknown tank kind: ${requestedKind}`);
 
@@ -140,7 +141,7 @@
       canvas.width = 1120;
       canvas.height = 560;
       const caption = document.createElement("figcaption");
-      caption.innerHTML = `${variant.label}<span>${variant.model}</span>`;
+      caption.innerHTML = `${variant.label}<span>${variant.model}${damageState ? " / damaged" : ""}</span>`;
       figure.append(canvas, caption);
       document.body.append(figure);
 
@@ -162,7 +163,7 @@
       }
       context.stroke();
 
-      GameRenderer.renderTankPreview(context, {
+      const tank = {
         id: -1,
         kind: requestedKind,
         x: requestedKind === "boss" ? 49 : 47,
@@ -170,15 +171,41 @@
         radius: variant.radius,
         hullAngle: 0,
         turretAngle: 0,
-        hp: 1,
-        maxHp: 1,
+        hp: damageState ? 1 : 4,
+        maxHp: 4,
         cooldown: 0,
         dashCooldown: 0,
         invulnerable: 0,
         alive: true,
         patrolAngle: 0,
         strafeDirection: 1,
-      }, variant.color, variant.accent);
+        trackCooldown: 0,
+        recoil: damageState ? (requestedKind === "boss" || requestedKind === "heavy" ? 6.5 : 4) : 0,
+        recoilTime: damageState ? 0.06 : 0,
+        recoilDuration: requestedKind === "boss" || requestedKind === "heavy" ? 0.13 : 0.09,
+        chassisKick: damageState ? 1.2 : 0,
+        damageFlash: damageState ? 0.1 : 0,
+        lastHitDirection: -0.35,
+        smokeIntensity: damageState ? 0.9 : 0,
+        smokeCooldown: 0,
+      };
+      if (damageState) {
+        GameRenderer.renderDamageStatePreview(context, tank, variant.color, variant.accent);
+        GameRenderer.renderEffectPreview(context, {
+          kind: "smoke",
+          x: tank.x + 2,
+          y: tank.y - 9,
+          velocityX: 0,
+          velocityY: -8,
+          life: 0.8,
+          maxLife: 1,
+          size: 6.5,
+          color: "#151918",
+          angle: 0,
+        });
+      } else {
+        GameRenderer.renderTankPreview(context, tank, variant.color, variant.accent);
+      }
 
       document.documentElement.dataset.renderReady = "true";
     </script>

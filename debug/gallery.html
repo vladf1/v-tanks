@@ -215,6 +215,22 @@
         </div>
         <div id="effects" class="grid"></div>
       </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>Arena themes and minimaps</h2>
+          <p class="status">Static deterministic terrain and mission geometry</p>
+        </div>
+        <div id="themes" class="grid"></div>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>Damage and battlefield history</h2>
+          <p class="status">Production damage states, wreck silhouettes, and persistent decals</p>
+        </div>
+        <div id="history" class="grid"></div>
+      </section>
     </main>
 
     <script type="module">
@@ -229,6 +245,8 @@
         POWER_UP_DEFINITIONS,
         POWER_UP_KINDS,
       } from "/src/game/powerups.ts";
+      import { MISSIONS } from "/src/game/levels.ts";
+      import { VISUAL_THEMES } from "/src/game/visual-state.ts";
 
       const tankVariants = [
         { kind: "player", label: "Player", model: "Abrams", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
@@ -252,6 +270,8 @@
       const obstaclesRoot = document.querySelector("#obstacles");
       const powerUpsRoot = document.querySelector("#powerups");
       const effectsRoot = document.querySelector("#effects");
+      const themesRoot = document.querySelector("#themes");
+      const historyRoot = document.querySelector("#history");
       const angleInput = document.querySelector("#angle");
       const angleOutput = document.querySelector("#angle-output");
 
@@ -320,6 +340,15 @@
             alive: true,
             patrolAngle: 0,
             strafeDirection: 1,
+            trackCooldown: 0,
+            recoil: 0,
+            recoilTime: 0,
+            recoilDuration: 0,
+            chassisKick: 0,
+            damageFlash: 0,
+            lastHitDirection: 0,
+            smokeIntensity: 0,
+            smokeCooldown: 0,
           };
           GameRenderer.renderTankPreview(context, tank, variant.color, variant.accent);
         });
@@ -449,25 +478,24 @@
         }
       }
 
-      const particleCard = createCard("Impact particles", "Damage and debris", "obstacle");
-      effectsRoot.append(particleCard.figure);
-      {
-        const context = prepareCanvas(particleCard.canvas, 120, 60, 3);
-        const colors = [PLAYER_COLOR, PLAYER_ACCENT, ENEMY_COLOR, ENEMY_ACCENT, "#ffffff"];
-        for (let index = 0; index < 18; index += 1) {
-          const angle = (index / 18) * Math.PI * 2;
-          GameRenderer.renderParticlePreview(context, {
-            x: 60 + Math.cos(angle) * (10 + index % 3),
-            y: 30 + Math.sin(angle) * (10 + index % 3),
-            velocityX: Math.cos(angle) * 100,
-            velocityY: Math.sin(angle) * 100,
-            life: 0.5 + (index % 4) * 0.12,
-            maxLife: 1,
-            size: 1.6 + (index % 3) * 0.4,
-            color: colors[index % colors.length],
-          });
-        }
-      }
+      const particleKinds = ["spark", "smoke", "dust", "debris", "flash", "ring"];
+      particleKinds.forEach((kind, index) => {
+        const card = createCard(kind, "Explicit airborne effect kind", "obstacle");
+        effectsRoot.append(card.figure);
+        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        GameRenderer.renderEffectPreview(context, {
+          kind,
+          x: 60,
+          y: 30,
+          velocityX: kind === "spark" || kind === "debris" ? 80 : 0,
+          velocityY: kind === "spark" || kind === "debris" ? -20 : 0,
+          life: 0.72,
+          maxLife: 1,
+          size: kind === "flash" || kind === "ring" ? 14 : kind === "smoke" ? 8 : 3,
+          color: ["#fff0b4", "#303735", "#a99a72", "#ff7c73", "#fff7d1", "#ffb45f"][index],
+          angle: -0.25,
+        });
+      });
 
       const targetingCard = createCard("Targeting", "Crosshair and boss armor", "obstacle");
       effectsRoot.append(targetingCard.figure);
@@ -490,9 +518,127 @@
           alive: true,
           patrolAngle: 0,
           strafeDirection: 1,
+          trackCooldown: 0,
+          recoil: 0,
+          recoilTime: 0,
+          recoilDuration: 0,
+          chassisKick: 0,
+          damageFlash: 0,
+          lastHitDirection: 0,
+          smokeIntensity: 0,
+          smokeCooldown: 0,
         };
         GameRenderer.renderBossArmorPreview(context, boss, 0.8);
       }
+
+      [
+        { mission: MISSIONS[0], label: "Proving ground" },
+        { mission: MISSIONS[2], label: "Industrial" },
+        { mission: MISSIONS[5], label: "Command complex" },
+      ].forEach(({ mission, label }) => {
+        const themeCard = createCard(label, mission.visualTheme, "obstacle");
+        themesRoot.append(themeCard.figure);
+        const themeContext = prepareCanvas(themeCard.canvas, 120, 60, 3);
+        GameRenderer.renderThemePreview(themeContext, mission, 120, 60);
+
+        const mapCard = createCard(`${label} minimap`, mission.name, "obstacle");
+        themesRoot.append(mapCard.figure);
+        const mapContext = prepareCanvas(mapCard.canvas, 120, 60, 3);
+        GameRenderer.renderMinimapPreview(mapContext, mission, 120, 60);
+        GameRenderer.renderMissionIconsPreview(mapContext, mission, 62, 18);
+      });
+
+      const damageKinds = ["player", "heavy", "support", "artillery", "boss"];
+      damageKinds.forEach((kind, index) => {
+        const variant = tankVariants.find((entry) => entry.kind === kind);
+        const severe = index >= 2;
+        const card = createCard(`${variant.model} damage`, severe ? "Below 25%" : "Below 50%", "obstacle");
+        historyRoot.append(card.figure);
+        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        GameRenderer.renderDamageStatePreview(context, {
+          id: index,
+          kind: variant.kind,
+          x: 43,
+          y: 30,
+          radius: variant.radius,
+          hullAngle: 0,
+          turretAngle: 0,
+          hp: severe ? 1 : 2,
+          maxHp: 5,
+          cooldown: 0,
+          dashCooldown: 0,
+          invulnerable: 0,
+          alive: true,
+          patrolAngle: 0,
+          strafeDirection: 1,
+          trackCooldown: 0,
+          recoil: kind === "boss" || kind === "heavy" ? 6.5 : 4,
+          recoilTime: 0.06,
+          recoilDuration: kind === "boss" || kind === "heavy" ? 0.13 : 0.09,
+          chassisKick: 1.2,
+          damageFlash: 0.1,
+          lastHitDirection: -0.35,
+          smokeIntensity: severe ? 0.9 : 0.36,
+          smokeCooldown: 0,
+        }, variant.color, variant.accent);
+        GameRenderer.renderEffectPreview(context, {
+          kind: "smoke",
+          x: 45,
+          y: 20,
+          velocityX: 0,
+          velocityY: -8,
+          life: 0.8,
+          maxLife: 1,
+          size: severe ? 9 : 5,
+          color: severe ? "#151918" : "#38403d",
+          angle: 0,
+        });
+      });
+
+      ["player", "scout", "heavy", "boss"].forEach((kind, index) => {
+        const variant = tankVariants.find((entry) => entry.kind === kind);
+        const card = createCard(`${variant.model} wreck`, "Non-colliding remainder", "obstacle");
+        historyRoot.append(card.figure);
+        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        GameRenderer.renderWreckPreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 30,
+          hullAngle: 0.18,
+          turretAngle: -0.32,
+          scale: kind === "boss" ? 1.48 : kind === "heavy" ? 1.18 : 1,
+          faction: kind === "player" ? "player" : "enemy",
+          burn: 0.7,
+          life: kind === "boss" ? 4 : 24,
+        });
+      });
+
+      const decalKinds = [
+        "scorch", "crater", "mine-crater", "wall-chip", "oil",
+        "rubble", "grate", "warning", "cable", "casings",
+      ];
+      decalKinds.forEach((kind, index) => {
+        const wreckLinked = kind === "scorch" || kind === "oil";
+        const card = createCard(
+          kind,
+          wreckLinked ? "Wreck-linked fade" : "Persistent decal",
+          "obstacle",
+        );
+        historyRoot.append(card.figure);
+        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        GameRenderer.renderDecalPreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 30,
+          angle: 0.18,
+          size: kind === "cable" ? 22 : 13,
+          opacity: 0.72,
+          color: VISUAL_THEMES.industrial.decalPalette[index % 4],
+          life: wreckLinked ? 4 : undefined,
+        }, VISUAL_THEMES.industrial);
+      });
 
       angleInput.addEventListener("input", renderTanks);
       renderTanks();

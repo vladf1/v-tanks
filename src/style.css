@@ -345,8 +345,7 @@ button:focus-visible {
     inset 0 0 0 1px rgba(255, 255, 255, 0.018);
   backdrop-filter: blur(20px);
   max-height: calc(100dvh - 128px);
-  overflow-y: auto;
-  scrollbar-color: rgba(157, 255, 215, 0.35) transparent;
+  overflow: hidden;
 }
 
 .panel-heading {
@@ -386,11 +385,12 @@ button:focus-visible {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
-  margin: 10px 0;
+  margin: 7px 0;
 }
 
 .mission-card {
   position: relative;
+  height: 64px;
   min-height: 62px;
   display: grid;
   grid-template-columns: 1fr;
@@ -404,6 +404,33 @@ button:focus-visible {
   cursor: pointer;
   text-align: left;
   transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.mission-map {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.mission-icons {
+  position: absolute;
+  z-index: 1;
+  right: 4px;
+  bottom: 5px;
+  width: 54px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.mission-card > span {
+  position: relative;
+  z-index: 2;
 }
 
 .mission-card:hover:not(:disabled) {
@@ -476,6 +503,7 @@ button:focus-visible {
 }
 
 .mission-brief {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(190px, 0.75fr);
   gap: 24px;
@@ -483,6 +511,24 @@ button:focus-visible {
   padding: 10px;
   border: 1px solid rgba(157, 255, 215, 0.1);
   background: rgba(1, 5, 4, 0.52);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.selected-operation-map {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.mission-brief > div,
+.mission-brief > dl {
+  position: relative;
+  z-index: 1;
 }
 
 .mission-brief h3 {

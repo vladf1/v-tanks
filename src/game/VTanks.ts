@@ -1,5 +1,6 @@
 import { TankGame, type GamePhase, type GameSnapshot } from "./engine";
 import { getMissionEnemyTotal, MISSIONS } from "./levels";
+import { GameRenderer } from "./renderer";
 import { POWER_UP_DEFINITIONS } from "./powerups";
 import {
   CANNONS,
@@ -64,6 +65,8 @@ function getRating(snapshot: GameSnapshot): MissionRank {
 function missionCards(): string {
   return MISSIONS.map((mission, index) => `
     <button class="mission-card" data-mission-index="${index}">
+      <canvas class="mission-map" data-mission-map="${index}" aria-hidden="true"></canvas>
+      <canvas class="mission-icons" data-mission-icons="${index}" aria-hidden="true"></canvas>
       <span class="mission-number">${mission.number}</span>
       <span class="mission-name">${mission.name}</span>
       <span class="threat threat-${mission.threat.toLowerCase()}">${mission.threat}</span>
@@ -106,10 +109,13 @@ export class VTanks {
   private selectedMission = 0;
   private soundEnabled = this.save.settings.sound;
   private recordedResultPhase: GamePhase | null = null;
+  private renderedSelectedMapIndex = -1;
+  private renderedSelectedMapSize = "";
 
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = gameShell;
     requiredElement(root, ".mission-grid").innerHTML = missionCards();
+    this.renderMissionCardMaps();
     requiredElement(root, '[data-loadout-options="cannon"]').innerHTML =
       loadoutButtons("cannon", CANNONS);
     requiredElement(root, '[data-loadout-options="chassis"]').innerHTML =
@@ -254,6 +260,71 @@ export class VTanks {
     this.game.showMenu();
   }
 
+  private preparePreviewCanvas(canvas: HTMLCanvasElement): {
+    context: CanvasRenderingContext2D;
+    width: number;
+    height: number;
+  } | null {
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, width, height);
+    return { context, width, height };
+  }
+
+  private renderMissionCardMaps(): void {
+    this.root.querySelectorAll<HTMLCanvasElement>("[data-mission-map]").forEach((canvas) => {
+      const index = Number.parseInt(canvas.dataset.missionMap ?? "", 10);
+      const prepared = this.preparePreviewCanvas(canvas);
+      if (!prepared || !MISSIONS[index]) return;
+      GameRenderer.renderMinimapPreview(
+        prepared.context,
+        MISSIONS[index],
+        prepared.width,
+        prepared.height,
+        0.34,
+      );
+    });
+    this.root.querySelectorAll<HTMLCanvasElement>("[data-mission-icons]").forEach((canvas) => {
+      const index = Number.parseInt(canvas.dataset.missionIcons ?? "", 10);
+      const prepared = this.preparePreviewCanvas(canvas);
+      if (!prepared || !MISSIONS[index]) return;
+      GameRenderer.renderMissionIconsPreview(
+        prepared.context,
+        MISSIONS[index],
+        prepared.width,
+        prepared.height,
+      );
+    });
+  }
+
+  private renderSelectedMissionMap(missionIndex: number): void {
+    const canvas = requiredElement<HTMLCanvasElement>(this.root, "[data-selected-map]");
+    const rect = canvas.getBoundingClientRect();
+    const sizeKey = `${Math.round(rect.width)}x${Math.round(rect.height)}@${window.devicePixelRatio || 1}`;
+    if (
+      this.renderedSelectedMapIndex === missionIndex
+      && this.renderedSelectedMapSize === sizeKey
+    ) return;
+    const prepared = this.preparePreviewCanvas(canvas);
+    if (!prepared) return;
+    GameRenderer.renderMinimapPreview(
+      prepared.context,
+      MISSIONS[missionIndex],
+      prepared.width,
+      prepared.height,
+      0.24,
+    );
+    this.renderedSelectedMapIndex = missionIndex;
+    this.renderedSelectedMapSize = sizeKey;
+  }
+
   private render(): void {
     const currentMission = MISSIONS[this.snapshot.missionIndex];
     const selected = MISSIONS[this.selectedMission];
@@ -359,6 +430,7 @@ export class VTanks {
     requiredElement(this.root, "[data-selected-threat]").textContent = selected.threat;
     requiredElement(this.root, "[data-selected-objective]").textContent = selected.objective.label;
     requiredElement(this.root, "[data-selected-bonus]").textContent = selected.bonus.label;
+    this.renderSelectedMissionMap(this.selectedMission);
 
     this.root.querySelectorAll<HTMLButtonElement>("[data-loadout-group]").forEach((button) => {
       const group = button.dataset.loadoutGroup as keyof Loadout;

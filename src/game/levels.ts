@@ -30,6 +30,16 @@ export interface EnemySpawn extends Point {
 export type ObjectiveKind = "eliminate" | "relays" | "hold" | "survive" | "omega";
 export type BonusKind = "accuracy" | "hull" | "time" | "ricochet";
 export type HazardKind = "barrel" | "mud" | "minefield" | "repair-station" | "barricade";
+export type VisualThemeKey = "proving-ground" | "industrial" | "command-complex";
+
+export function getMissionVisualTheme(missionNumber: string | number): VisualThemeKey {
+  const parsed = typeof missionNumber === "number"
+    ? missionNumber
+    : Number.parseInt(missionNumber, 10);
+  if ([3, 5, 8].includes(parsed)) return "industrial";
+  if ([6, 9, 10].includes(parsed)) return "command-complex";
+  return "proving-ground";
+}
 
 export interface ObjectiveSpec {
   kind: ObjectiveKind;
@@ -60,6 +70,7 @@ export interface ReinforcementPlan {
 
 export interface Mission {
   number: string;
+  visualTheme: VisualThemeKey;
   name: string;
   briefing: string;
   threat: string;
@@ -98,7 +109,10 @@ export function getCameraPosition(focus: Point): Point {
   };
 }
 
-type MissionTemplate = Omit<Mission, "reinforcements" | "walls" | "objective" | "bonus" | "hazards"> & {
+type MissionTemplate = Omit<
+  Mission,
+  "visualTheme" | "reinforcements" | "walls" | "objective" | "bonus" | "hazards"
+> & {
   walls: Array<Omit<Wall, "kind">>;
 };
 
@@ -285,6 +299,7 @@ function expandMission(mission: MissionTemplate, missionIndex: number): Mission 
   };
   return {
     ...expanded,
+    visualTheme: getMissionVisualTheme(mission.number),
     objective: createObjective(expanded, missionIndex),
     bonus: createBonus(missionIndex),
     hazards: createHazards(expanded, missionIndex),
