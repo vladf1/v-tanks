@@ -171,18 +171,6 @@ export function calculateRecoilOffset(
   return strength * progress * progress;
 }
 
-export function getAdmittedParticleCount(
-  kind: ParticleKind,
-  requested: number,
-  reducedMotion: boolean,
-): number {
-  const safeCount = Math.max(0, Math.floor(requested));
-  if (!reducedMotion) return safeCount;
-  if (kind === "ring") return 0;
-  if (kind === "smoke" || kind === "dust") return Math.ceil(safeCount / 2);
-  return Math.max(safeCount > 0 ? 1 : 0, safeCount);
-}
-
 export function pushCapped<T extends { critical?: boolean }>(
   collection: T[],
   value: T,

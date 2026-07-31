@@ -64,7 +64,6 @@ export interface RenderState {
   decals: Decal[];
   wrecks: Wreck[];
   theme: VisualTheme;
-  reducedMotion: boolean;
   shake: number;
   mouse: Point;
   attractTime: number;

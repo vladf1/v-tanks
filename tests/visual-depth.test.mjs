@@ -12,7 +12,6 @@ import {
   calculateRecoilOffset,
   generateEnvironmentalDetails,
   generateGroundTileTexture,
-  getAdmittedParticleCount,
   getWreckOpacity,
   pushCapped,
 } from "../src/game/visual-state.ts";
@@ -66,14 +65,6 @@ test("wrecks remain solid for 20 seconds and then fade out", () => {
   assert.equal(getWreckOpacity(WRECK_FADE_SECONDS), 1);
   assert.equal(getWreckOpacity(WRECK_FADE_SECONDS / 2), 0.5);
   assert.equal(getWreckOpacity(0), 0);
-});
-
-test("reduced motion removes rings and halves dust and smoke", () => {
-  assert.equal(getAdmittedParticleCount("ring", 1, true), 0);
-  assert.equal(getAdmittedParticleCount("smoke", 9, true), 5);
-  assert.equal(getAdmittedParticleCount("dust", 8, true), 4);
-  assert.equal(getAdmittedParticleCount("spark", 8, true), 8);
-  assert.equal(getAdmittedParticleCount("flash", 1, true), 1);
 });
 
 test("every visual collection cap evicts the oldest noncritical entry", () => {

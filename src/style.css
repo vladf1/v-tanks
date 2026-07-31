@@ -876,6 +876,37 @@ kbd {
   transition: width 80ms linear;
 }
 
+.fps-readout {
+  position: absolute;
+  z-index: 4;
+  top: 92px;
+  right: 30px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(157, 255, 215, 0.1);
+  background: rgba(2, 7, 5, 0.56);
+  color: rgba(239, 255, 247, 0.72);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.fps-readout strong {
+  min-width: 2ch;
+  font-size: 10px;
+  line-height: 1;
+  text-align: right;
+}
+
+.fps-readout span {
+  color: rgba(141, 181, 163, 0.64);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
 .overlay-screen {
   position: absolute;
   z-index: 10;
@@ -1053,6 +1084,11 @@ kbd {
   .control-strip {
     bottom: 18px;
   }
+
+  .fps-readout {
+    top: 84px;
+    right: 20px;
+  }
 }
 
 @media (max-width: 899px), (max-height: 599px), (pointer: coarse) {
@@ -1066,6 +1102,7 @@ kbd {
   .menu-layout,
   .combat-status,
   .control-strip,
+  .fps-readout,
   .boss-readout,
   .overlay-screen {
     display: none;
@@ -1115,16 +1152,5 @@ kbd {
     margin: 0;
     color: var(--muted);
     line-height: 1.5;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
   }
 }

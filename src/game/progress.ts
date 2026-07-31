@@ -13,7 +13,6 @@ export interface MissionRecord {
 export interface GameSettings {
   sound: boolean;
   cameraShake: boolean;
-  reducedMotion: boolean;
 }
 
 export interface CampaignSave {
@@ -39,7 +38,6 @@ export function createDefaultSave(): CampaignSave {
     settings: {
       sound: true,
       cameraShake: true,
-      reducedMotion: false,
     },
   };
 }
@@ -55,7 +53,10 @@ export function readCampaignSave(): CampaignSave {
       unlockedMission: Math.max(0, stored.unlockedMission ?? fallback.unlockedMission),
       records: stored.records ?? {},
       loadout: parseLoadout(stored.loadout),
-      settings: { ...fallback.settings, ...stored.settings },
+      settings: {
+        sound: stored.settings?.sound ?? fallback.settings.sound,
+        cameraShake: stored.settings?.cameraShake ?? fallback.settings.cameraShake,
+      },
     };
   } catch {
     return fallback;

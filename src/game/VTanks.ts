@@ -42,6 +42,7 @@ const INITIAL_SNAPSHOT: GameSnapshot = {
   score: 0,
   wave: 1,
   utilityCharges: 0,
+  fps: 0,
 };
 
 function formatTime(seconds: number): string {
@@ -224,12 +225,6 @@ export class VTanks {
       writeCampaignSave(this.save);
       this.render();
     }
-    if (action === "motion") {
-      this.save.settings.reducedMotion = !this.save.settings.reducedMotion;
-      this.game.configure(this.save.loadout, this.save.settings);
-      writeCampaignSave(this.save);
-      this.render();
-    }
     if (action === "pause") this.game.pause();
     if (action === "resume") this.game.resume();
     if (action === "deploy") this.startMission(this.selectedMission);
@@ -353,6 +348,8 @@ export class VTanks {
     requiredElement(this.root, "[data-objective-label]").textContent =
       this.snapshot.objectiveLabel;
     requiredElement(this.root, "[data-time]").textContent = formatTime(this.snapshot.elapsed);
+    requiredElement(this.root, "[data-fps-value]").textContent =
+      this.snapshot.fps > 0 ? String(this.snapshot.fps) : "--";
 
     const soundButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="sound"]');
     const soundLabel = this.soundEnabled ? "Mute sound" : "Enable sound";
@@ -361,9 +358,6 @@ export class VTanks {
     soundButton.title = soundLabel;
     const shakeButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="shake"]');
     shakeButton.textContent = this.save.settings.cameraShake ? "SHAKE ON" : "SHAKE OFF";
-    const motionButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="motion"]');
-    motionButton.textContent = this.save.settings.reducedMotion ? "MOTION LOW" : "MOTION FULL";
-
     const armorPips = requiredElement<HTMLElement>(this.root, ".armor-pips");
     armorPips.replaceChildren(...Array.from({ length: this.snapshot.maxHealth }, (_, index) => {
       const pip = document.createElement("i");

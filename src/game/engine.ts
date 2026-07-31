@@ -50,7 +50,6 @@ import {
   WRECK_FADE_SECONDS,
   WRECK_SOLID_SECONDS,
   generateEnvironmentalDetails,
-  getAdmittedParticleCount,
   pushCapped,
   type Decal,
   type ParticleKind,
@@ -85,6 +84,7 @@ export interface GameSnapshot {
   score: number;
   wave: number;
   utilityCharges: number;
+  fps: number;
 }
 
 export interface Tank extends Point {
@@ -177,7 +177,6 @@ export interface TrackMark extends Point {
 
 export interface FeedbackSettings {
   cameraShake: boolean;
-  reducedMotion: boolean;
 }
 
 const PLAYER_SPEED = 184;
@@ -377,7 +376,7 @@ export class TankGame {
   private mode: GameMode = "campaign";
   private phase: GamePhase = "menu";
   private loadout: Loadout = { cannon: "ricochet", chassis: "balanced", utility: "dash" };
-  private feedback: FeedbackSettings = { cameraShake: true, reducedMotion: false };
+  private feedback: FeedbackSettings = { cameraShake: true };
   private player: Tank = this.createPlayer(this.mission.player);
   private enemies: Tank[] = [];
   private projectiles: Projectile[] = [];
@@ -412,6 +411,9 @@ export class TankGame {
   private shake = 0;
   private survivalRandom: () => number = Math.random;
   private hitStop = 0;
+  private fps = 0;
+  private fpsSampleStart = 0;
+  private fpsSampleFrames = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -616,13 +618,14 @@ export class TankGame {
   }
 
   private readonly frame = (timestamp: number): void => {
+    this.updateFps(timestamp);
     const rawDelta = this.previousFrame === 0 ? 0 : (timestamp - this.previousFrame) / 1000;
     this.previousFrame = timestamp;
     const delta = Math.min(rawDelta, 0.05);
     this.attractTime += delta;
 
     if (this.phase === "playing") {
-      if (this.hitStop > 0 && !this.feedback.reducedMotion) {
+      if (this.hitStop > 0) {
         this.hitStop = Math.max(0, this.hitStop - delta);
       } else {
         const steps = Math.max(1, Math.ceil(delta / (1 / 120)));
@@ -638,6 +641,7 @@ export class TankGame {
     this.canvas.dataset.trackCount = String(this.trackMarks.length);
     this.canvas.dataset.decalCount = String(this.decals.length);
     this.canvas.dataset.wreckCount = String(this.wrecks.length);
+    this.canvas.dataset.fps = String(this.fps);
     this.renderer.render({
       phase: this.phase,
       mission: this.mission,
@@ -655,13 +659,28 @@ export class TankGame {
       decals: this.decals,
       wrecks: this.wrecks,
       theme: VISUAL_THEMES[this.mission.visualTheme],
-      reducedMotion: this.feedback.reducedMotion,
-      shake: this.feedback.cameraShake && !this.feedback.reducedMotion ? this.shake : 0,
+      shake: this.feedback.cameraShake ? this.shake : 0,
       mouse: this.mouse,
       attractTime: this.attractTime,
     });
     this.animationFrame = requestAnimationFrame(this.frame);
   };
+
+  private updateFps(timestamp: number): void {
+    if (this.fpsSampleStart === 0 || timestamp - this.fpsSampleStart > 2_000) {
+      this.fpsSampleStart = timestamp;
+      this.fpsSampleFrames = 0;
+      return;
+    }
+
+    this.fpsSampleFrames += 1;
+    const sampleDuration = timestamp - this.fpsSampleStart;
+    if (sampleDuration < 500) return;
+
+    this.fps = Math.round((this.fpsSampleFrames * 1_000) / sampleDuration);
+    this.fpsSampleStart = timestamp;
+    this.fpsSampleFrames = 0;
+  }
 
   private bindEvents(): void {
     window.addEventListener("keydown", this.onKeyDown);
@@ -1063,7 +1082,7 @@ export class TankGame {
     tank.recoil = heavyShot ? 6.5 : 4;
     tank.recoilDuration = heavyShot ? 0.13 : 0.09;
     tank.recoilTime = tank.recoilDuration;
-    tank.chassisKick = this.feedback.reducedMotion ? 0 : 1.5;
+    tank.chassisKick = 1.5;
     const muzzle = tank.radius + 15;
     const x = tank.x + Math.cos(angle) * muzzle;
     const y = tank.y + Math.sin(angle) * muzzle;
@@ -1105,7 +1124,7 @@ export class TankGame {
     this.player.dashCooldown = this.loadout.utility === "dash" ? 2.6 : 3.8;
     this.player.invulnerable = Math.max(this.player.invulnerable, 0.28);
     for (let step = 0; step < 8; step += 1) this.moveTank(this.player, dx * 9, dy * 9);
-    const dashDustCount = getAdmittedParticleCount("dust", 12, this.feedback.reducedMotion);
+    const dashDustCount = 12;
     for (let index = 0; index < dashDustCount; index += 1) {
       this.addParticle({
         kind: "dust",
@@ -1497,7 +1516,7 @@ export class TankGame {
   ): void {
     tank.trackCooldown -= delta;
     if (tank.trackCooldown > 0) return;
-    tank.trackCooldown = this.feedback.reducedMotion ? interval * 2 : interval;
+    tank.trackCooldown = interval;
     const scale = tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1;
     for (const side of [-1, 1]) {
       pushCapped(this.trackMarks, {
@@ -1767,11 +1786,7 @@ export class TankGame {
       tank.smokeCooldown -= delta;
       if (tank.smokeCooldown > 0) continue;
       tank.smokeCooldown = tank.smokeIntensity > 0.5 ? 0.09 : 0.24;
-      const smokeCount = getAdmittedParticleCount(
-        "smoke",
-        tank.smokeIntensity > 0.5 ? 2 : 1,
-        this.feedback.reducedMotion,
-      );
+      const smokeCount = tank.smokeIntensity > 0.5 ? 2 : 1;
       for (let index = 0; index < smokeCount; index += 1) {
         this.addParticle({
           kind: "smoke",
@@ -1847,7 +1862,7 @@ export class TankGame {
     direction?: number,
     kind: ParticleKind = "spark",
   ): void {
-    const admitted = getAdmittedParticleCount(kind, count, this.feedback.reducedMotion);
+    const admitted = Math.max(0, Math.floor(count));
     for (let index = 0; index < admitted; index += 1) {
       const angle = direction === undefined
         ? Math.random() * TAU
@@ -1904,28 +1919,22 @@ export class TankGame {
       angle: 0,
       critical: true,
     });
-    if (!this.feedback.reducedMotion) {
-      this.addParticle({
-        kind: "ring",
-        x,
-        y,
-        velocityX: 0,
-        velocityY: 0,
-        life: 0.24,
-        maxLife: 0.24,
-        size: size * 0.32,
-        color,
-        angle: 0,
-      });
-    }
+    this.addParticle({
+      kind: "ring",
+      x,
+      y,
+      velocityX: 0,
+      velocityY: 0,
+      life: 0.24,
+      maxLife: 0.24,
+      size: size * 0.32,
+      color,
+      angle: 0,
+    });
 
     const debrisCount = Math.round(size * 0.48);
     this.spawnImpactParticles(x, y, color, debrisCount, undefined, "debris");
-    const smokeCount = getAdmittedParticleCount(
-      "smoke",
-      Math.max(4, Math.round(size * 0.28)),
-      this.feedback.reducedMotion,
-    );
+    const smokeCount = Math.max(4, Math.round(size * 0.28));
     for (let index = 0; index < smokeCount; index += 1) {
       const angle = Math.random() * TAU;
       const speed = 12 + Math.random() * size * 1.8;
@@ -1994,6 +2003,7 @@ export class TankGame {
       score: this.score,
       wave: this.wave,
       utilityCharges: this.utilityCharges,
+      fps: this.fps,
     });
   }
 
