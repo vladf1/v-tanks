@@ -399,7 +399,7 @@
           id: index,
           kind,
           x: 60,
-          y: 30,
+          y: kind === "relay" ? 33 : 30,
           radius: kind === "mud" ? 28 : 20,
           active: true,
           cooldown: 0,
@@ -634,9 +634,11 @@
           y: 30,
           angle: 0.18,
           size: kind === "cable" ? 22 : 13,
-          opacity: 0.72,
-          color: VISUAL_THEMES.industrial.decalPalette[index % 4],
-          life: wreckLinked ? 4 : undefined,
+          opacity: kind === "oil" ? 0.9 : 0.72,
+          color: kind === "oil"
+            ? VISUAL_THEMES.industrial.decalPalette[1]
+            : VISUAL_THEMES.industrial.decalPalette[index % 4],
+          life: wreckLinked ? 8 : undefined,
         }, VISUAL_THEMES.industrial);
       });
 

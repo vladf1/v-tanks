@@ -175,10 +175,6 @@ export interface TrackMark extends Point {
   critical?: boolean;
 }
 
-export interface FeedbackSettings {
-  cameraShake: boolean;
-}
-
 const PLAYER_SPEED = 184;
 const TANK_GUTTER = 24;
 const TAU = Math.PI * 2;
@@ -376,7 +372,6 @@ export class TankGame {
   private mode: GameMode = "campaign";
   private phase: GamePhase = "menu";
   private loadout: Loadout = { cannon: "ricochet", chassis: "balanced", utility: "dash" };
-  private feedback: FeedbackSettings = { cameraShake: true };
   private player: Tank = this.createPlayer(this.mission.player);
   private enemies: Tank[] = [];
   private projectiles: Projectile[] = [];
@@ -438,9 +433,8 @@ export class TankGame {
     this.audio.setEnabled(enabled);
   }
 
-  configure(loadout: Loadout, feedback: FeedbackSettings): void {
+  configure(loadout: Loadout): void {
     this.loadout = { ...loadout };
-    this.feedback = { ...feedback };
   }
 
   showMenu(): void {
@@ -659,7 +653,7 @@ export class TankGame {
       decals: this.decals,
       wrecks: this.wrecks,
       theme: VISUAL_THEMES[this.mission.visualTheme],
-      shake: this.feedback.cameraShake ? this.shake : 0,
+      shake: this.shake,
       mouse: this.mouse,
       attractTime: this.attractTime,
     });

@@ -28,7 +28,6 @@
       </div>
     </div>
     <div class="chrome-actions">
-      <button class="text-icon-button" data-action="shake">SHAKE ON</button>
       <button class="icon-button" data-action="sound"></button>
       <button class="chrome-button" data-action="pause" hidden>PAUSE</button>
     </div>
@@ -50,6 +49,11 @@
   <section class="powerup-readout" data-powerup-readout hidden aria-label="Active power-ups">
     <span>ACTIVE SYSTEMS</span>
     <div data-active-powerups></div>
+  </section>
+  <section class="mission-tip" data-combat hidden aria-live="polite">
+    <span data-tip-title>FIELD DIRECTIVE</span>
+    <strong data-tip-copy></strong>
+    <small data-tip-secondary hidden></small>
   </section>
   <div class="fps-readout" data-combat hidden aria-label="Frame rate">
     <strong data-fps-value>--</strong><span>FPS</span>

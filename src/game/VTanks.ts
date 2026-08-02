@@ -56,6 +56,39 @@ function accuracy(snapshot: GameSnapshot): number {
   return Math.round((snapshot.hits / snapshot.shots) * 100);
 }
 
+function getMissionTip(
+  mission: (typeof MISSIONS)[number],
+  snapshot: GameSnapshot,
+): { title: string; copy: string; secondary: string } {
+  let title = "FIELD DIRECTIVE";
+  let copy = "Destroy every hostile tank.";
+  if (mission.objective.kind === "relays") {
+    title = "TARGET / BLUE RELAYS";
+    copy = "Shoot the marked relay towers. Hostiles are secondary.";
+  } else if (mission.objective.kind === "hold") {
+    title = "HOLD / YELLOW UPLINK";
+    copy = "Stay inside the uplink ring. Leaving drains link progress.";
+  } else if (mission.objective.kind === "survive") {
+    title = "SURVIVE / CLOCK";
+    copy = "Keep moving until the operation timer expires.";
+  } else if (mission.objective.kind === "omega") {
+    if (snapshot.objectiveDetail.includes("SHIELDS ACTIVE")) {
+      title = "OMEGA / SHIELDS";
+      copy = "Destroy the marked blue relays to expose the Omega Core.";
+    } else if (snapshot.objectiveDetail === "DESTROY OMEGA") {
+      title = "OMEGA / CORE EXPOSED";
+      copy = "The shield is down. Destroy the Omega Core.";
+    } else {
+      title = "OMEGA / EXTRACT";
+      copy = "Drive into the active green extraction zone.";
+    }
+  }
+  const secondary = mission.hazards.some((hazard) => hazard.kind === "barricade")
+    ? "BREACH TIP / Concrete barricades block tanks. Shoot them to clear a path."
+    : "";
+  return { title, copy, secondary };
+}
+
 function getRating(snapshot: GameSnapshot): MissionRank {
   const mission = MISSIONS[snapshot.missionIndex];
   if (snapshot.elapsed <= mission.parTime && accuracy(snapshot) >= 65 && snapshot.health >= 2) return "S";
@@ -134,7 +167,7 @@ export class VTanks {
       this.onSnapshot,
       this.onPhase,
     );
-    this.game.configure(this.save.loadout, this.save.settings);
+    this.game.configure(this.save.loadout);
     this.game.setSound(this.soundEnabled);
     this.render();
   }
@@ -202,7 +235,7 @@ export class VTanks {
       const value = loadoutButton.dataset.loadoutValue;
       if (group && value) {
         this.save.loadout = { ...this.save.loadout, [group]: value };
-        this.game.configure(this.save.loadout, this.save.settings);
+        this.game.configure(this.save.loadout);
         writeCampaignSave(this.save);
         this.render();
       }
@@ -219,12 +252,6 @@ export class VTanks {
       writeCampaignSave(this.save);
       this.render();
     }
-    if (action === "shake") {
-      this.save.settings.cameraShake = !this.save.settings.cameraShake;
-      this.game.configure(this.save.loadout, this.save.settings);
-      writeCampaignSave(this.save);
-      this.render();
-    }
     if (action === "pause") this.game.pause();
     if (action === "resume") this.game.resume();
     if (action === "deploy") this.startMission(this.selectedMission);
@@ -238,7 +265,7 @@ export class VTanks {
   private startMission(index: number): void {
     this.recordedResultPhase = null;
     this.selectedMission = index;
-    this.game.configure(this.save.loadout, this.save.settings);
+    this.game.configure(this.save.loadout);
     this.game.startMission(index);
   }
 
@@ -246,7 +273,7 @@ export class VTanks {
     this.recordedResultPhase = null;
     const now = new Date();
     const seed = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-    this.game.configure(this.save.loadout, this.save.settings);
+    this.game.configure(this.save.loadout);
     this.game.startSurvival(seed);
   }
 
@@ -351,13 +378,20 @@ export class VTanks {
     requiredElement(this.root, "[data-fps-value]").textContent =
       this.snapshot.fps > 0 ? String(this.snapshot.fps) : "--";
 
+    const missionTip = getMissionTip(currentMission, this.snapshot);
+    const missionTipElement = requiredElement<HTMLElement>(this.root, ".mission-tip");
+    missionTipElement.classList.toggle("boss-active", this.snapshot.bossHealth !== null);
+    requiredElement(this.root, "[data-tip-title]").textContent = missionTip.title;
+    requiredElement(this.root, "[data-tip-copy]").textContent = missionTip.copy;
+    const secondaryTip = requiredElement<HTMLElement>(this.root, "[data-tip-secondary]");
+    secondaryTip.textContent = missionTip.secondary;
+    secondaryTip.hidden = !missionTip.secondary;
+
     const soundButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="sound"]');
     const soundLabel = this.soundEnabled ? "Mute sound" : "Enable sound";
     soundButton.textContent = this.soundEnabled ? ")))" : "×";
     soundButton.ariaLabel = soundLabel;
     soundButton.title = soundLabel;
-    const shakeButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="shake"]');
-    shakeButton.textContent = this.save.settings.cameraShake ? "SHAKE ON" : "SHAKE OFF";
     const armorPips = requiredElement<HTMLElement>(this.root, ".armor-pips");
     armorPips.replaceChildren(...Array.from({ length: this.snapshot.maxHealth }, (_, index) => {
       const pip = document.createElement("i");

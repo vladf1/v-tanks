@@ -12,7 +12,6 @@ export interface MissionRecord {
 
 export interface GameSettings {
   sound: boolean;
-  cameraShake: boolean;
 }
 
 export interface CampaignSave {
@@ -37,7 +36,6 @@ export function createDefaultSave(): CampaignSave {
     survivalBest: 0,
     settings: {
       sound: true,
-      cameraShake: true,
     },
   };
 }
@@ -55,7 +53,6 @@ export function readCampaignSave(): CampaignSave {
       loadout: parseLoadout(stored.loadout),
       settings: {
         sound: stored.settings?.sound ?? fallback.settings.sound,
-        cameraShake: stored.settings?.cameraShake ?? fallback.settings.cameraShake,
       },
     };
   } catch {

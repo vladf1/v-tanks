@@ -47,6 +47,42 @@ function noise(seed: number): number {
   return value - Math.floor(value);
 }
 
+function traceOilBlob(
+  context: CanvasRenderingContext2D,
+  decal: Decal,
+  salt: number,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number,
+  pointCount = 13,
+): void {
+  const seed = decal.id * 37 + Math.round(decal.x) * 3 + Math.round(decal.y) * 5 + salt;
+  const points = Array.from({ length: pointCount }, (_, index) => {
+    const angle = (index / pointCount) * TAU;
+    const radius = 0.68 + noise(seed + index * 17) * 0.44;
+    const lobe = index % 4 === 0 ? 1.12 + noise(seed + index * 23) * 0.18 : 1;
+    return {
+      x: centerX + Math.cos(angle) * radiusX * radius * lobe,
+      y: centerY + Math.sin(angle) * radiusY * radius * lobe,
+    };
+  });
+  const first = points[0];
+  const last = points.at(-1) ?? first;
+  context.beginPath();
+  context.moveTo((last.x + first.x) * 0.5, (last.y + first.y) * 0.5);
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length];
+    context.quadraticCurveTo(
+      point.x,
+      point.y,
+      (point.x + next.x) * 0.5,
+      (point.y + next.y) * 0.5,
+    );
+  });
+  context.closePath();
+}
+
 export interface RenderState {
   phase: GamePhase;
   mission: Mission;
@@ -473,7 +509,44 @@ export class GameRenderer {
     context.globalAlpha = decal.opacity * fade;
     context.fillStyle = decal.color;
     context.strokeStyle = decal.color;
-    if (decal.kind === "scorch" || decal.kind === "oil") {
+    if (decal.kind === "oil") {
+      traceOilBlob(context, decal, 11, 0, 0, decal.size, decal.size * 0.72);
+      context.fill();
+
+      context.globalAlpha *= 0.58;
+      context.fillStyle = "#020403";
+      traceOilBlob(
+        context,
+        decal,
+        97,
+        decal.size * 0.08,
+        -decal.size * 0.03,
+        decal.size * 0.62,
+        decal.size * 0.4,
+        11,
+      );
+      context.fill();
+
+      context.globalAlpha *= 0.72;
+      context.fillStyle = decal.color;
+      const dropletSeed = decal.id * 31 + Math.round(decal.x + decal.y);
+      for (let index = 0; index < 4; index += 1) {
+        const angle = noise(dropletSeed + index * 19) * TAU;
+        const distance = decal.size * (0.9 + noise(dropletSeed + index * 29) * 0.52);
+        const radius = decal.size * (0.07 + noise(dropletSeed + index * 41) * 0.09);
+        traceOilBlob(
+          context,
+          decal,
+          211 + index * 43,
+          Math.cos(angle) * distance,
+          Math.sin(angle) * distance * 0.72,
+          radius,
+          radius * (0.72 + noise(dropletSeed + index * 47) * 0.38),
+          7,
+        );
+        context.fill();
+      }
+    } else if (decal.kind === "scorch") {
       context.beginPath();
       context.ellipse(0, 0, decal.size, decal.size * 0.58, 0.1, 0, TAU);
       context.fill();
@@ -665,21 +738,60 @@ export class GameRenderer {
       context.fillStyle = POWER_UP_DEFINITIONS.repair.color;
       context.fillRect(-3, -11, 6, 22);
       context.fillRect(-11, -3, 22, 6);
-    } else {
-      context.fillStyle = "#1b211d";
-      context.strokeStyle = "#b9c7be";
-      context.lineWidth = 1.5;
-      context.rotate(Math.PI / 4);
-      context.fillRect(-15, -15, 30, 30);
-      context.strokeRect(-15, -15, 30, 30);
+    } else if (hazard.kind === "barricade") {
+      const barrierAngle = (hazard.id % 4) * Math.PI / 4 + Math.PI / 8;
+      context.save();
+      context.rotate(barrierAngle);
+      context.fillStyle = "#080b09";
+      context.fillRect(-22, -13, 9, 26);
+      context.fillRect(13, -13, 9, 26);
+      context.fillStyle = "#4d5550";
+      context.strokeStyle = "#d5ded8";
+      context.lineWidth = 1.4;
+      context.beginPath();
+      context.moveTo(-23, -10);
+      context.lineTo(23, -10);
+      context.lineTo(19, 10);
+      context.lineTo(-19, 10);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.fillStyle = "#69716c";
+      context.beginPath();
+      context.moveTo(-20, -8);
+      context.lineTo(20, -8);
+      context.lineTo(17, -2);
+      context.lineTo(-17, -2);
+      context.closePath();
+      context.fill();
       context.strokeStyle = "#ffb45f";
       context.lineWidth = 3;
-      context.beginPath();
-      context.moveTo(-12, -6);
-      context.lineTo(12, -6);
-      context.moveTo(-12, 6);
-      context.lineTo(12, 6);
-      context.stroke();
+      for (let x = -14; x <= 14; x += 9) {
+        context.beginPath();
+        context.moveTo(x - 4, 7);
+        context.lineTo(x + 3, -7);
+        context.stroke();
+      }
+      context.fillStyle = "#1b211d";
+      for (const x of [-15, 15]) {
+        context.beginPath();
+        context.arc(x, 0, 2, 0, TAU);
+        context.fill();
+      }
+      context.restore();
+      context.strokeStyle = "rgba(255, 180, 95, 0.82)";
+      context.lineWidth = 1.2;
+      for (const side of [-1, 1]) {
+        context.beginPath();
+        context.moveTo(side * 25, -10);
+        context.lineTo(side * 25, -18);
+        context.lineTo(side * 17, -18);
+        context.stroke();
+      }
+      context.fillStyle = "#ffcf87";
+      context.font = "bold 7px monospace";
+      context.textAlign = "center";
+      context.fillText("SHOOT TO BREACH", 0, -23);
     }
     context.restore();
   }
@@ -702,15 +814,68 @@ export class GameRenderer {
     context.stroke();
     context.setLineDash([]);
     if (node.kind === "relay") {
-      context.rotate(time * 0.45 + node.id);
-      for (let index = 0; index < 4; index += 1) {
-        context.rotate(Math.PI / 2);
-        context.fillStyle = color;
-        context.fillRect(13, -3, 12, 6);
+      const pulse = 0.5 + Math.sin(time * 3 + node.id) * 0.5;
+      context.globalAlpha = 0.38 + pulse * 0.3;
+      context.setLineDash([3, 4]);
+      context.beginPath();
+      context.arc(0, 0, 27 + pulse * 3, 0, TAU);
+      context.stroke();
+      context.setLineDash([]);
+      context.globalAlpha = 1;
+
+      context.fillStyle = "#071411";
+      context.strokeStyle = color;
+      context.lineWidth = 1.6;
+      context.beginPath();
+      for (let index = 0; index < 8; index += 1) {
+        const angle = Math.PI / 8 + index * Math.PI / 4;
+        const x = Math.cos(angle) * 18;
+        const y = Math.sin(angle) * 18;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
       }
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.fillStyle = "#122b25";
+      context.fillRect(-10, -10, 20, 20);
+      context.strokeRect(-10, -10, 20, 20);
+
+      context.save();
+      context.rotate(time * 0.7 + node.id * 0.9);
       context.fillStyle = color;
-      context.fillRect(-4, -13, 8, 26);
-      context.fillRect(-13, -4, 26, 8);
+      context.beginPath();
+      context.moveTo(2, 0);
+      context.lineTo(17, -8);
+      context.lineTo(17, 8);
+      context.closePath();
+      context.fill();
+      context.fillStyle = "#d9fff2";
+      context.beginPath();
+      context.arc(0, 0, 4, 0, TAU);
+      context.fill();
+      context.restore();
+
+      context.strokeStyle = "rgba(123, 220, 255, 0.88)";
+      context.lineWidth = 1.2;
+      for (const side of [-1, 1]) {
+        context.beginPath();
+        context.moveTo(side * 25, -14);
+        context.lineTo(side * 25, -22);
+        context.lineTo(side * 16, -22);
+        context.stroke();
+      }
+      context.fillStyle = "#bdefff";
+      context.font = "bold 7px monospace";
+      context.textAlign = "center";
+      context.fillText("DESTROY RELAY", 0, -28);
+      const pipWidth = 7;
+      const pipGap = 2;
+      const pipStart = -((node.maxHp * pipWidth + (node.maxHp - 1) * pipGap) / 2);
+      for (let index = 0; index < node.maxHp; index += 1) {
+        context.fillStyle = index < node.hp ? color : "rgba(123, 220, 255, 0.16)";
+        context.fillRect(pipStart + index * (pipWidth + pipGap), 26, pipWidth, 3);
+      }
     } else {
       context.globalAlpha = 0.25 + Math.sin(time * 3) * 0.08;
       context.fillStyle = color;
@@ -1628,28 +1793,46 @@ export class GameRenderer {
 
   private drawProjectile(context: CanvasRenderingContext2D, projectile: Projectile): void {
     context.save();
-    context.globalCompositeOperation = "lighter";
     const speed = Math.hypot(projectile.velocityX, projectile.velocityY);
-    const trail = 14;
+    const angle = speed > 0.001
+      ? Math.atan2(projectile.velocityY, projectile.velocityX)
+      : 0;
+    const shellLength = Math.max(10, projectile.radius * 3.2) + (projectile.damage > 1 ? 4 : 0);
+    const shellWidth = Math.max(3.4, projectile.radius * 1.2) + (projectile.damage > 1 ? 1 : 0);
+    const trail = shellLength * 1.7;
+    context.translate(projectile.x, projectile.y);
+    context.rotate(angle);
+    context.globalCompositeOperation = "lighter";
     context.strokeStyle = projectile.color;
-    context.globalAlpha = 0.28;
-    context.lineWidth = projectile.radius * 2.4;
+    context.globalAlpha = 0.2;
+    context.lineWidth = shellWidth * 1.5;
     context.beginPath();
-    context.moveTo(
-      projectile.x - (projectile.velocityX / speed) * trail,
-      projectile.y - (projectile.velocityY / speed) * trail,
-    );
-    context.lineTo(projectile.x, projectile.y);
+    context.moveTo(-trail, 0);
+    context.lineTo(-shellLength * 0.25, 0);
     context.stroke();
+    context.globalCompositeOperation = "source-over";
+    context.strokeStyle = "rgba(2, 5, 4, 0.92)";
+    context.lineWidth = 1.2;
     context.globalAlpha = 1;
     context.fillStyle = projectile.color;
     context.beginPath();
-    context.arc(projectile.x, projectile.y, projectile.radius, 0, TAU);
+    context.moveTo(shellLength * 0.56, 0);
+    context.lineTo(shellLength * 0.16, -shellWidth * 0.5);
+    context.lineTo(-shellLength * 0.5, -shellWidth * 0.34);
+    context.lineTo(-shellLength * 0.5, shellWidth * 0.34);
+    context.lineTo(shellLength * 0.16, shellWidth * 0.5);
+    context.closePath();
     context.fill();
-    context.fillStyle = "#fffbe2";
+    context.stroke();
+    context.fillStyle = "rgba(255, 255, 235, 0.92)";
     context.beginPath();
-    context.arc(projectile.x, projectile.y, projectile.radius * 0.42, 0, TAU);
+    context.moveTo(shellLength * 0.56, 0);
+    context.lineTo(shellLength * 0.18, -shellWidth * 0.22);
+    context.lineTo(shellLength * 0.18, shellWidth * 0.22);
+    context.closePath();
     context.fill();
+    context.fillStyle = "rgba(5, 9, 7, 0.72)";
+    context.fillRect(-shellLength * 0.48, -shellWidth * 0.44, 2, shellWidth * 0.88);
     context.restore();
   }
 
