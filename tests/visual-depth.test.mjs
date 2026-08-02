@@ -137,3 +137,35 @@ test("renderer preserves the visual depth order", async () => {
     previous = index;
   }
 });
+
+test("wall runs keep the terrain grid visible between individual obstacles", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf("private drawWall");
+  const end = rendererSource.indexOf("private drawRockWall", start);
+  const drawWall = rendererSource.slice(start, end);
+  assert.doesNotMatch(drawWall, /fillRect\(wall\.x[^;]+wall\.height\)/);
+});
+
+test("victory and defeat cross-fade over the retained arena with reduced-motion support", async () => {
+  const stylesheet = await readFile(
+    new URL("../src/style.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(stylesheet, /\.phase-victory \.game-canvas,\s*\.phase-defeat \.game-canvas\s*\{[^}]*outcome-level-fade/s);
+  assert.match(stylesheet, /\[data-screen="victory"\] \.overlay-card,\s*\.phase-defeat \[data-screen="defeat"\] \.overlay-card\s*\{[^}]*outcome-card-in/s);
+  assert.match(stylesheet, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("camera shake stops when gameplay enters a non-playing phase", async () => {
+  const engineSource = await readFile(
+    new URL("../src/game/engine.ts", import.meta.url),
+    "utf8",
+  );
+  const start = engineSource.indexOf("private setPhase");
+  const end = engineSource.indexOf("private publishSnapshot", start);
+  const setPhase = engineSource.slice(start, end);
+  assert.match(setPhase, /phase !== "playing"[^;]+this\.shake = 0/s);
+});

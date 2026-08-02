@@ -961,6 +961,74 @@ kbd {
   text-align: center;
 }
 
+.phase-victory .game-canvas,
+.phase-defeat .game-canvas {
+  animation: outcome-level-fade 1600ms ease-out both;
+}
+
+.phase-victory [data-screen="victory"].overlay-screen,
+.phase-defeat [data-screen="defeat"].overlay-screen {
+  isolation: isolate;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.phase-victory [data-screen="victory"].overlay-screen::before,
+.phase-defeat [data-screen="defeat"].overlay-screen::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  content: "";
+  background:
+    radial-gradient(circle at center, rgba(10, 28, 21, 0.08), rgba(1, 4, 3, 0.58) 72%),
+    rgba(1, 4, 3, 0.2);
+  backdrop-filter: blur(2px);
+  animation: outcome-backdrop-in 1100ms ease-out 180ms both;
+}
+
+.phase-victory [data-screen="victory"] .overlay-card,
+.phase-defeat [data-screen="defeat"] .overlay-card {
+  position: relative;
+  z-index: 1;
+  animation: outcome-card-in 650ms cubic-bezier(0.2, 0.72, 0.22, 1) 500ms both;
+}
+
+@keyframes outcome-level-fade {
+  from {
+    opacity: 1;
+    filter: brightness(1) saturate(1);
+  }
+
+  to {
+    opacity: 0.62;
+    filter: brightness(0.72) saturate(0.8);
+  }
+}
+
+@keyframes outcome-backdrop-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+
+  to {
+    opacity: 1;
+    backdrop-filter: blur(2px);
+  }
+}
+
+@keyframes outcome-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .overlay-eyebrow {
   display: flex;
   align-items: center;
@@ -1195,4 +1263,25 @@ kbd {
     color: var(--muted);
     line-height: 1.5;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase-victory .game-canvas,
+  .phase-defeat .game-canvas,
+  .phase-victory [data-screen="victory"].overlay-screen::before,
+  .phase-defeat [data-screen="defeat"].overlay-screen::before {
+    animation-duration: 140ms;
+    animation-delay: 0ms;
+    animation-timing-function: linear;
+  }
+
+  .phase-victory [data-screen="victory"] .overlay-card,
+  .phase-defeat [data-screen="defeat"] .overlay-card {
+    animation: outcome-card-reduced 140ms linear both;
+  }
+}
+
+@keyframes outcome-card-reduced {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

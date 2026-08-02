@@ -1089,11 +1089,6 @@ export class GameRenderer {
   }
 
   private drawWall(context: CanvasRenderingContext2D, wall: Wall): void {
-    context.save();
-    context.globalAlpha = (this.activeTheme?.shadowStrength ?? 0.34) * 0.72;
-    context.fillStyle = "#000000";
-    context.fillRect(wall.x + 4, wall.y + 5, wall.width, wall.height);
-    context.restore();
     if (wall.kind === "rock") {
       this.drawRockWall(context, wall);
     } else if (wall.kind === "dragons-teeth") {

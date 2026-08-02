@@ -1960,6 +1960,7 @@ export class TankGame {
 
   private setPhase(phase: GamePhase): void {
     if (this.phase === phase) return;
+    if (phase !== "playing") this.shake = 0;
     this.phase = phase;
     this.onPhase(phase);
     this.publishSnapshot();
