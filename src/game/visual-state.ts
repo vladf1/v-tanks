@@ -58,6 +58,7 @@ export interface Wreck extends Point {
 
 export const WRECK_SOLID_SECONDS = 20;
 export const WRECK_FADE_SECONDS = 8;
+export const GROUND_OVERSCAN = 64;
 
 export function getWreckOpacity(life: number): number {
   if (life <= 0) return 0;

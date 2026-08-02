@@ -6,6 +6,7 @@ import {
   getMissionVisualTheme,
 } from "../src/game/levels.ts";
 import {
+  GROUND_OVERSCAN,
   VISUAL_CAPS,
   WRECK_FADE_SECONDS,
   WRECK_SOLID_SECONDS,
@@ -15,6 +16,10 @@ import {
   getWreckOpacity,
   pushCapped,
 } from "../src/game/visual-state.ts";
+
+test("ground artwork extends beyond unreachable world edges", () => {
+  assert.ok(GROUND_OVERSCAN >= 32);
+});
 
 test("missions map to the requested visual themes", () => {
   assert.deepEqual(

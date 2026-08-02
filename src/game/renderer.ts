@@ -25,6 +25,7 @@ import {
   type PowerUp,
 } from "./powerups";
 import {
+  GROUND_OVERSCAN,
   VISUAL_THEMES,
   calculateRecoilOffset,
   generateEnvironmentalDetails,
@@ -322,7 +323,13 @@ export class GameRenderer {
       const shakeX = state.shake > 0 ? Math.sin(state.attractTime * 83) * state.shake : 0;
       const shakeY = state.shake > 0 ? Math.cos(state.attractTime * 71) * state.shake : 0;
       context.translate(-camera.x + shakeX, -camera.y + shakeY);
-      this.drawGround(context, state.mission, WORLD_WIDTH, WORLD_HEIGHT);
+      this.drawGround(
+        context,
+        state.mission,
+        WORLD_WIDTH,
+        WORLD_HEIGHT,
+        GROUND_OVERSCAN,
+      );
       this.drawMission(context, state);
       context.restore();
       this.drawRadar(context, state.player, state.enemies, state.powerUps);
@@ -387,19 +394,28 @@ export class GameRenderer {
     mission: Mission,
     width: number,
     height: number,
+    overscan = 0,
   ): void {
     const theme = VISUAL_THEMES[mission.visualTheme];
     this.activeTheme = theme;
-    const gradient = context.createLinearGradient(0, 0, width, height);
+    const minX = -overscan;
+    const minY = -overscan;
+    const maxX = width + overscan;
+    const maxY = height + overscan;
+    const gradient = context.createLinearGradient(minX, minY, maxX, maxY);
     gradient.addColorStop(0, theme.ground[0]);
     gradient.addColorStop(0.55, theme.ground[1]);
     gradient.addColorStop(1, theme.ground[2]);
     context.fillStyle = gradient;
-    context.fillRect(0, 0, width, height);
+    context.fillRect(minX, minY, maxX - minX, maxY - minY);
 
     const tileSize = 64;
-    for (let tileY = 0; tileY < Math.ceil(height / tileSize); tileY += 1) {
-      for (let tileX = 0; tileX < Math.ceil(width / tileSize); tileX += 1) {
+    const minTileX = Math.floor(minX / tileSize);
+    const minTileY = Math.floor(minY / tileSize);
+    const maxTileX = Math.ceil(maxX / tileSize);
+    const maxTileY = Math.ceil(maxY / tileSize);
+    for (let tileY = minTileY; tileY < maxTileY; tileY += 1) {
+      for (let tileX = minTileX; tileX < maxTileX; tileX += 1) {
         for (const sample of generateGroundTileTexture(mission.number, tileX, tileY)) {
           context.globalAlpha = sample.alpha;
           context.fillStyle = sample.dark ? theme.texture[1] : theme.texture[0];
@@ -421,13 +437,16 @@ export class GameRenderer {
     context.globalAlpha = theme.gridOpacity;
     context.lineWidth = 1;
     context.beginPath();
-    for (let x = 0; x <= width; x += 32) {
-      context.moveTo(x, 0);
-      context.lineTo(x, height);
+    const gridSize = 32;
+    const minGridX = Math.floor(minX / gridSize) * gridSize;
+    const minGridY = Math.floor(minY / gridSize) * gridSize;
+    for (let x = minGridX; x <= maxX; x += gridSize) {
+      context.moveTo(x, minY);
+      context.lineTo(x, maxY);
     }
-    for (let y = 0; y <= height; y += 32) {
-      context.moveTo(0, y);
-      context.lineTo(width, y);
+    for (let y = minGridY; y <= maxY; y += gridSize) {
+      context.moveTo(minX, y);
+      context.lineTo(maxX, y);
     }
     context.stroke();
     context.globalAlpha = 1;
