@@ -28,6 +28,14 @@ test("campaign distributes varied objectives, bonuses, hazards, and specialist e
   }
 });
 
+test("uplink hold objectives take 20 seconds", () => {
+  const holdObjectives = MISSIONS
+    .map((mission) => mission.objective)
+    .filter((objective) => objective.kind === "hold");
+  assert.ok(holdObjectives.length > 0);
+  assert.ok(holdObjectives.every((objective) => objective.targetSeconds === 20));
+});
+
 test("loadout options are balanced sidegrades with validated fallbacks", () => {
   assert.equal(CANNON_KINDS.length, 3);
   assert.equal(CHASSIS_KINDS.length, 3);

@@ -459,7 +459,7 @@
       effectsRoot.append(projectileCard.figure);
       {
         const context = prepareCanvas(projectileCard.canvas, 120, 60, 3);
-        for (const [index, color] of [PLAYER_ACCENT, ENEMY_ACCENT].entries()) {
+        for (const [index, color] of [PLAYER_COLOR, ENEMY_ACCENT].entries()) {
           GameRenderer.renderProjectilePreview(context, {
             x: 40 + index * 45,
             y: 22 + index * 17,

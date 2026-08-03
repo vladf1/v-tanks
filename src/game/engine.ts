@@ -646,6 +646,9 @@ export class TankGame {
       powerUps: this.powerUps,
       activePowerUps: this.activePowerUps,
       objectiveNodes: this.objectiveNodes,
+      uplinkSecondsRemaining: this.mission.objective.kind === "hold"
+        ? Math.ceil(Math.max(0, this.mission.objective.targetSeconds - this.holdProgress))
+        : null,
       hazards: this.hazards,
       mines: this.mines,
       artilleryStrikes: this.artilleryStrikes,
@@ -1093,7 +1096,7 @@ export class TankGame {
       damage,
       radius: owner === "player" ? 4 : 4.5,
       color: owner === "player"
-        ? damage > 1 ? POWER_UP_DEFINITIONS.ricochet.color : "#ffe27a"
+        ? PLAYER_COLOR
         : "#ff8c7d",
       ricocheted: false,
     });

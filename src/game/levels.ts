@@ -203,7 +203,7 @@ function createObjective(
     };
   }
   if (kind === "hold") {
-    const seconds = missionIndex >= 6 ? 42 : 32;
+    const seconds = 20;
     return {
       kind,
       label: "HOLD UPLINK",

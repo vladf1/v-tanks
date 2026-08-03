@@ -370,6 +370,8 @@ export class VTanks {
       this.snapshot.mode === "survival"
         ? `WAVE ${this.snapshot.wave}`
         : `${this.snapshot.enemiesLeft} / ${this.snapshot.totalEnemies}`;
+    requiredElement<HTMLElement>(this.root, "[data-objective-readout]").hidden =
+      this.snapshot.mode === "campaign" && currentMission.objective.kind === "eliminate";
     requiredElement(this.root, "[data-mission-completion]").textContent =
       this.snapshot.objectiveDetail;
     requiredElement(this.root, "[data-objective-label]").textContent =

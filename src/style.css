@@ -836,12 +836,12 @@ kbd {
 .mission-tip {
   position: absolute;
   z-index: 4;
-  top: 91px;
+  top: auto;
+  bottom: 96px;
   left: 50%;
   width: min(520px, 46vw);
   display: grid;
   gap: 5px;
-  transform: translateX(-50%);
   padding: 10px 14px;
   border: 1px solid rgba(255, 226, 122, 0.3);
   border-left: 3px solid var(--amber);
@@ -849,10 +849,7 @@ kbd {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(12px);
   pointer-events: none;
-}
-
-.mission-tip.boss-active {
-  top: 150px;
+  animation: mission-tip-in-out 5200ms ease both;
 }
 
 .mission-tip > span {
@@ -875,6 +872,23 @@ kbd {
   font: 700 7px/1.3 var(--font-mono);
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+@keyframes mission-tip-in-out {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+
+  8%, 72% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
 }
 
 .powerup-chip {
@@ -1190,13 +1204,10 @@ kbd {
   }
 
   .mission-tip {
-    top: 82px;
+    top: auto;
+    bottom: 76px;
     width: min(500px, 52vw);
     padding: 8px 12px;
-  }
-
-  .mission-tip.boss-active {
-    top: 140px;
   }
 }
 
@@ -1266,6 +1277,10 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .mission-tip {
+    animation: mission-tip-reduced 4200ms linear both;
+  }
+
   .phase-victory .game-canvas,
   .phase-defeat .game-canvas,
   .phase-victory [data-screen="victory"].overlay-screen::before,
@@ -1279,6 +1294,11 @@ kbd {
   .phase-defeat [data-screen="defeat"] .overlay-card {
     animation: outcome-card-reduced 140ms linear both;
   }
+}
+
+@keyframes mission-tip-reduced {
+  0%, 72% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 @keyframes outcome-card-reduced {

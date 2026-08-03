@@ -149,6 +149,36 @@ test("wall runs keep the terrain grid visible between individual obstacles", asy
   assert.doesNotMatch(drawWall, /fillRect\(wall\.x[^;]+wall\.height\)/);
 });
 
+test("hedgehogs use contact shadows instead of black backing shapes", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf("private drawHedgehogs");
+  const end = rendererSource.indexOf("private drawTank", start);
+  const drawHedgehogs = rendererSource.slice(start, end);
+  assert.match(drawHedgehogs, /rgba\(0, 0, 0, 0\.26\)/);
+  assert.doesNotMatch(drawHedgehogs, /rgba\(0, 0, 0, 0\.72\)/);
+});
+
+test("uplink circles show the hold instruction and live countdown", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf("private drawObjectiveNode");
+  const end = rendererSource.indexOf("private drawMine", start);
+  const drawObjectiveNode = rendererSource.slice(start, end);
+  assert.match(drawObjectiveNode, /fillText\("HOLD HERE"/);
+  assert.match(drawObjectiveNode, /secondsRemaining \?\? 20/);
+
+  const engineSource = await readFile(
+    new URL("../src/game/engine.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(engineSource, /uplinkSecondsRemaining:[\s\S]*targetSeconds - this\.holdProgress/);
+});
+
 test("victory and defeat cross-fade over the retained arena with reduced-motion support", async () => {
   const stylesheet = await readFile(
     new URL("../src/style.css", import.meta.url),
@@ -168,4 +198,41 @@ test("camera shake stops when gameplay enters a non-playing phase", async () => 
   const end = engineSource.indexOf("private publishSnapshot", start);
   const setPhase = engineSource.slice(start, end);
   assert.match(setPhase, /phase !== "playing"[^;]+this\.shake = 0/s);
+});
+
+test("mission directions appear at the bottom temporarily and honor reduced motion", async () => {
+  const stylesheet = await readFile(
+    new URL("../src/style.css", import.meta.url),
+    "utf8",
+  );
+  const start = stylesheet.indexOf(".mission-tip {");
+  const end = stylesheet.indexOf(".mission-tip > span", start);
+  const missionTip = stylesheet.slice(start, end);
+  assert.match(missionTip, /bottom:\s*96px/);
+  assert.doesNotMatch(missionTip, /top:\s*91px/);
+  assert.match(missionTip, /animation:\s*mission-tip-in-out/);
+  assert.match(stylesheet, /@keyframes mission-tip-in-out[\s\S]*100%[\s\S]*opacity:\s*0/);
+  assert.match(stylesheet, /@media \(prefers-reduced-motion: reduce\)[\s\S]*mission-tip-reduced/);
+});
+
+test("player projectiles use the player tank color", async () => {
+  const engineSource = await readFile(
+    new URL("../src/game/engine.ts", import.meta.url),
+    "utf8",
+  );
+  const start = engineSource.indexOf("private spawnProjectile");
+  const end = engineSource.indexOf("private tryDash", start);
+  const spawnProjectile = engineSource.slice(start, end);
+  assert.match(spawnProjectile, /color:\s*owner === "player"\s*\? PLAYER_COLOR/);
+});
+
+test("eliminate missions do not repeat enemy progress in the objective readout", async () => {
+  const uiSource = await readFile(
+    new URL("../src/game/VTanks.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    uiSource,
+    /\[data-objective-readout\][\s\S]*currentMission\.objective\.kind === "eliminate"/,
+  );
 });

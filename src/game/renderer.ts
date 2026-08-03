@@ -94,6 +94,7 @@ export interface RenderState {
   powerUps: PowerUp[];
   activePowerUps: ActivePowerUps;
   objectiveNodes: ObjectiveNode[];
+  uplinkSecondsRemaining: number | null;
   hazards: HazardState[];
   mines: ProximityMine[];
   artilleryStrikes: ArtilleryStrike[];
@@ -192,7 +193,7 @@ export class GameRenderer {
     time: number,
   ): void {
     const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
-    renderer.drawObjectiveNode(context, node, time);
+    renderer.drawObjectiveNode(context, node, time, node.kind === "uplink" ? 20 : null);
   }
 
   static renderMinePreview(
@@ -492,7 +493,14 @@ export class GameRenderer {
       if (hazard.active) this.drawHazard(context, hazard, state.attractTime);
     }
     for (const node of state.objectiveNodes) {
-      if (node.active) this.drawObjectiveNode(context, node, state.attractTime);
+      if (node.active) {
+        this.drawObjectiveNode(
+          context,
+          node,
+          state.attractTime,
+          node.kind === "uplink" ? state.uplinkSecondsRemaining : null,
+        );
+      }
     }
     for (const mine of state.mines) this.drawMine(context, mine, state.attractTime);
     for (const strike of state.artilleryStrikes) this.drawArtilleryStrike(context, strike);
@@ -819,6 +827,7 @@ export class GameRenderer {
     context: CanvasRenderingContext2D,
     node: ObjectiveNode,
     time: number,
+    secondsRemaining: number | null = null,
   ): void {
     context.save();
     context.translate(node.x, node.y);
@@ -901,6 +910,16 @@ export class GameRenderer {
       context.beginPath();
       context.arc(0, 0, 48, 0, TAU);
       context.fill();
+      if (node.kind === "uplink") {
+        context.globalAlpha = 1;
+        context.fillStyle = "#fff4bf";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = "800 9px monospace";
+        context.fillText("HOLD HERE", 0, -8);
+        context.font = "800 18px monospace";
+        context.fillText(`${secondsRemaining ?? 20}s`, 0, 12);
+      }
     }
     context.restore();
   }
@@ -1306,12 +1325,12 @@ export class GameRenderer {
         context.translate(x, y);
         context.rotate(rotation);
 
-        context.strokeStyle = "rgba(0, 0, 0, 0.72)";
+        context.strokeStyle = "rgba(0, 0, 0, 0.26)";
         for (const [startX, startY, endX, endY] of beams) {
-          context.lineWidth = 6.2 + noise(seed + 7 + startY) * 1.5;
+          context.lineWidth = 4.2 + noise(seed + 7 + startY) * 0.8;
           context.beginPath();
-          context.moveTo(startX + 2.5, startY + 3);
-          context.lineTo(endX + 2.5, endY + 3);
+          context.moveTo(startX + 1.5, startY + 2);
+          context.lineTo(endX + 1.5, endY + 2);
           context.stroke();
         }
 
