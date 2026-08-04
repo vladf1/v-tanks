@@ -6,6 +6,11 @@ import {
   getMissionVisualTheme,
 } from "../src/game/levels.ts";
 import {
+  EJECTED_TURRET_CHANCE,
+  EJECTED_TURRET_FADE_SECONDS,
+  EJECTED_TURRET_MAX_ANGULAR_VELOCITY,
+  EJECTED_TURRET_MIN_ANGULAR_VELOCITY,
+  EJECTED_TURRET_SOLID_SECONDS,
   GROUND_OVERSCAN,
   VISUAL_CAPS,
   WRECK_FADE_SECONDS,
@@ -13,8 +18,10 @@ import {
   calculateRecoilOffset,
   generateEnvironmentalDetails,
   generateGroundTileTexture,
+  getEjectedTurretOpacity,
   getWreckOpacity,
   pushCapped,
+  updateEjectedTurret,
 } from "../src/game/visual-state.ts";
 
 test("ground artwork extends beyond unreachable world edges", () => {
@@ -72,6 +79,47 @@ test("wrecks remain solid for 20 seconds and then fade out", () => {
   assert.equal(getWreckOpacity(0), 0);
 });
 
+test("rare ejected enemy turrets travel, spin moderately, land, and fade", () => {
+  assert.equal(EJECTED_TURRET_CHANCE, 0.25);
+  assert.ok(EJECTED_TURRET_MIN_ANGULAR_VELOCITY >= 2);
+  assert.ok(EJECTED_TURRET_MAX_ANGULAR_VELOCITY <= 5);
+  const turret = {
+    id: 1,
+    kind: "guard",
+    x: 100,
+    y: 100,
+    angle: 0,
+    velocityX: 90,
+    velocityY: 0,
+    angularVelocity: 3.6,
+    height: 6,
+    verticalVelocity: 70,
+    scale: 1,
+    landed: false,
+    life: EJECTED_TURRET_SOLID_SECONDS + EJECTED_TURRET_FADE_SECONDS,
+  };
+  let maximumHeight = turret.height;
+  for (let frame = 0; frame < 180 && !turret.landed; frame += 1) {
+    updateEjectedTurret(turret, 1 / 60);
+    maximumHeight = Math.max(maximumHeight, turret.height);
+  }
+
+  assert.equal(turret.landed, true);
+  assert.equal(turret.height, 0);
+  assert.ok(maximumHeight > 25);
+  assert.ok(turret.x - 100 > 60);
+  assert.ok(Math.abs(turret.angle) > Math.PI);
+  assert.ok(Math.abs(turret.angle) < Math.PI * 2);
+  assert.equal(getEjectedTurretOpacity(turret.life), 1);
+
+  updateEjectedTurret(turret, EJECTED_TURRET_SOLID_SECONDS);
+  assert.equal(getEjectedTurretOpacity(turret.life), 1);
+  updateEjectedTurret(turret, EJECTED_TURRET_FADE_SECONDS / 2);
+  assert.equal(getEjectedTurretOpacity(turret.life), 0.5);
+  updateEjectedTurret(turret, EJECTED_TURRET_FADE_SECONDS / 2);
+  assert.equal(getEjectedTurretOpacity(turret.life), 0);
+});
+
 test("every visual collection cap evicts the oldest noncritical entry", () => {
   for (const cap of Object.values(VISUAL_CAPS)) {
     const collection = [{ id: "critical", critical: true }];
@@ -93,7 +141,7 @@ test("every visual collection cap evicts the oldest noncritical entry", () => {
   );
 });
 
-test("decals and wrecks stay outside collision and projectile resolution", async () => {
+test("decals, wrecks, and ejected turrets stay outside collision and projectile resolution", async () => {
   const engineSource = await readFile(
     new URL("../src/game/engine.ts", import.meta.url),
     "utf8",
@@ -103,13 +151,13 @@ test("decals and wrecks stay outside collision and projectile resolution", async
   const collisionCode = engineSource.slice(collisionStart, collisionEnd);
   assert.match(collisionCode, /this\.mission\.walls/);
   assert.match(collisionCode, /this\.hazards/);
-  assert.doesNotMatch(collisionCode, /this\.(decals|wrecks)/);
+  assert.doesNotMatch(collisionCode, /this\.(decals|wrecks|ejectedTurrets)/);
 
   const projectileStart = engineSource.indexOf("private updateProjectiles");
   const projectileEnd = engineSource.indexOf("private updateHazards", projectileStart);
   const projectileCode = engineSource.slice(projectileStart, projectileEnd);
   assert.match(projectileCode, /this\.mission\.walls/);
-  assert.doesNotMatch(projectileCode, /this\.(decals|wrecks)/);
+  assert.doesNotMatch(projectileCode, /this\.(decals|wrecks|ejectedTurrets)/);
 });
 
 test("renderer preserves the visual depth order", async () => {
@@ -126,6 +174,7 @@ test("renderer preserves the visual depth order", async () => {
     "state.mission.walls",
     "state.hazards",
     "state.wrecks",
+    "state.ejectedTurrets",
     "state.projectiles",
     "state.particles",
     "drawCrosshair",

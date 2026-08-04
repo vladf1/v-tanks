@@ -30,8 +30,10 @@ import {
   calculateRecoilOffset,
   generateEnvironmentalDetails,
   generateGroundTileTexture,
+  getEjectedTurretOpacity,
   getWreckOpacity,
   type Decal,
+  type EjectedTurret,
   type VisualTheme,
   type Wreck,
 } from "./visual-state.ts";
@@ -42,10 +44,20 @@ export const ENEMY_COLOR = "#ff7c73";
 export const ENEMY_ACCENT = "#ffb29d";
 
 const TAU = Math.PI * 2;
+const WRECK_COLOR = "#4a514d";
+const WRECK_ACCENT = "#232826";
 
 function noise(seed: number): number {
   const value = Math.sin(seed * 12.9898) * 43758.5453;
   return value - Math.floor(value);
+}
+
+function getTankRoleAccent(kind: Tank["kind"], accent: string): string {
+  return kind === "heavy"
+    ? "#ffb45f"
+    : kind === "minelayer" ? "#f06dff"
+      : kind === "support" ? "#7bdcff"
+        : kind === "artillery" ? "#ffe27a" : accent;
 }
 
 function traceOilBlob(
@@ -101,6 +113,7 @@ export interface RenderState {
   trackMarks: TrackMark[];
   decals: Decal[];
   wrecks: Wreck[];
+  ejectedTurrets: EjectedTurret[];
   theme: VisualTheme;
   shake: number;
   mouse: Point;
@@ -255,6 +268,16 @@ export class GameRenderer {
     const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
     renderer.activeTheme = theme;
     renderer.drawWreck(context, wreck);
+  }
+
+  static renderEjectedTurretPreview(
+    context: CanvasRenderingContext2D,
+    turret: EjectedTurret,
+    theme: VisualTheme = VISUAL_THEMES["proving-ground"],
+  ): void {
+    const renderer = Object.create(GameRenderer.prototype) as GameRenderer;
+    renderer.activeTheme = theme;
+    renderer.drawEjectedTurret(context, turret);
   }
 
   static renderDamageStatePreview(
@@ -505,6 +528,9 @@ export class GameRenderer {
     for (const mine of state.mines) this.drawMine(context, mine, state.attractTime);
     for (const strike of state.artilleryStrikes) this.drawArtilleryStrike(context, strike);
     for (const wreck of state.wrecks) this.drawWreck(context, wreck);
+    for (const turret of state.ejectedTurrets) {
+      if (turret.landed) this.drawEjectedTurret(context, turret);
+    }
     for (const powerUp of state.powerUps) {
       if (powerUp.active) this.drawPowerUp(context, powerUp, state.attractTime);
     }
@@ -523,6 +549,9 @@ export class GameRenderer {
         state.activePowerUps,
         state.attractTime,
       );
+    }
+    for (const turret of state.ejectedTurrets) {
+      if (!turret.landed) this.drawEjectedTurret(context, turret);
     }
     for (const particle of state.particles) this.drawParticle(context, particle);
     this.drawCrosshair(context, state.mouse);
@@ -675,12 +704,66 @@ export class GameRenderer {
     context.save();
     const fade = getWreckOpacity(wreck.life);
     context.globalAlpha = 0.58 * fade;
-    this.drawTank(context, tank, "#4a514d", "#232826");
+    if (wreck.faction === "enemy") {
+      context.translate(wreck.x, wreck.y);
+      context.rotate(wreck.hullAngle);
+      context.scale(wreck.scale, wreck.scale);
+      this.drawTankHull(context, tank.kind, WRECK_COLOR, WRECK_ACCENT);
+    } else {
+      this.drawTank(context, tank, WRECK_COLOR, WRECK_ACCENT);
+    }
+    context.restore();
+
+    context.save();
     context.globalAlpha = 0.52 * fade;
     context.fillStyle = "#050706";
     context.beginPath();
     context.ellipse(wreck.x, wreck.y, 17 * wreck.scale, 10 * wreck.scale, wreck.hullAngle, 0, TAU);
     context.fill();
+    context.restore();
+  }
+
+  private drawEjectedTurret(
+    context: CanvasRenderingContext2D,
+    turret: EjectedTurret,
+  ): void {
+    const fade = turret.landed ? getEjectedTurretOpacity(turret.life) : 1;
+    const height = Math.max(0, turret.height);
+    const airScale = 1 + Math.min(0.16, height * 0.0035);
+    const sink = turret.landed ? 1 - fade : 0;
+    const shadowStrength = this.activeTheme?.shadowStrength ?? 0.34;
+
+    context.save();
+    context.globalAlpha *= fade * shadowStrength * (turret.landed ? 0.74 : 0.92);
+    context.fillStyle = "#000000";
+    context.beginPath();
+    context.ellipse(
+      turret.x + 4 + height * 0.08,
+      turret.y + 5 + height * 0.12,
+      13 * turret.scale * (1 + height * 0.002),
+      8 * turret.scale * (1 + height * 0.001),
+      turret.angle,
+      0,
+      TAU,
+    );
+    context.fill();
+    context.restore();
+
+    context.save();
+    context.globalAlpha *= fade;
+    context.translate(turret.x, turret.y - height * 0.52 + sink * 3);
+    context.rotate(turret.angle);
+    context.scale(turret.scale * airScale, turret.scale * airScale * (1 - sink * 0.22));
+    const color = turret.landed ? WRECK_COLOR : "#75514c";
+    const accent = turret.landed
+      ? WRECK_ACCENT
+      : getTankRoleAccent(turret.kind, "#40312e");
+    this.drawTankTurret(
+      context,
+      turret.kind,
+      color,
+      accent,
+    );
     context.restore();
   }
 
@@ -1385,11 +1468,7 @@ export class GameRenderer {
       tank.recoilTime ?? 0,
       tank.recoilDuration ?? 0,
     );
-    const roleAccent = tank.kind === "heavy"
-      ? "#ffb45f"
-      : tank.kind === "minelayer" ? "#f06dff"
-        : tank.kind === "support" ? "#7bdcff"
-          : tank.kind === "artillery" ? "#ffe27a" : accent;
+    const roleAccent = getTankRoleAccent(tank.kind, accent);
     const inheritedAlpha = context.globalAlpha;
 
     context.save();

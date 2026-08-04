@@ -614,6 +614,52 @@
         });
       });
 
+      [
+        {
+          label: "Airborne turret",
+          note: "Rare enemy death / restrained flight",
+          turret: {
+            id: 40,
+            kind: "heavy",
+            x: 58,
+            y: 37,
+            angle: -0.62,
+            velocityX: 72,
+            velocityY: -28,
+            angularVelocity: 3.6,
+            height: 30,
+            verticalVelocity: 24,
+            scale: 1.18,
+            landed: false,
+            life: 9,
+          },
+        },
+        {
+          label: "Landed turret",
+          note: "Grounded / fading out",
+          turret: {
+            id: 41,
+            kind: "guard",
+            x: 60,
+            y: 30,
+            angle: 0.48,
+            velocityX: 0,
+            velocityY: 0,
+            angularVelocity: 0,
+            height: 0,
+            verticalVelocity: 0,
+            scale: 1,
+            landed: true,
+            life: 2.5,
+          },
+        },
+      ].forEach(({ label, note, turret }) => {
+        const card = createCard(label, note, "obstacle");
+        historyRoot.append(card.figure);
+        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        GameRenderer.renderEjectedTurretPreview(context, turret);
+      });
+
       const decalKinds = [
         "scorch", "crater", "mine-crater", "wall-chip", "oil",
         "rubble", "grate", "warning", "cable", "casings",

@@ -45,13 +45,20 @@ import {
   type Loadout,
 } from "./loadouts";
 import {
+  EJECTED_TURRET_CHANCE,
+  EJECTED_TURRET_FADE_SECONDS,
+  EJECTED_TURRET_MAX_ANGULAR_VELOCITY,
+  EJECTED_TURRET_MIN_ANGULAR_VELOCITY,
+  EJECTED_TURRET_SOLID_SECONDS,
   VISUAL_CAPS,
   VISUAL_THEMES,
   WRECK_FADE_SECONDS,
   WRECK_SOLID_SECONDS,
   generateEnvironmentalDetails,
   pushCapped,
+  updateEjectedTurret,
   type Decal,
+  type EjectedTurret,
   type ParticleKind,
   type Wreck,
 } from "./visual-state.ts";
@@ -397,6 +404,7 @@ export class TankGame {
   private trackMarks: TrackMark[] = [];
   private decals: Decal[] = [];
   private wrecks: Wreck[] = [];
+  private ejectedTurrets: EjectedTurret[] = [];
   private nextDecalId = 1;
   private holdProgress = 0;
   private ricochetHits = 0;
@@ -501,6 +509,7 @@ export class TankGame {
     this.trackMarks = [];
     this.decals = generateEnvironmentalDetails(this.mission);
     this.wrecks = [];
+    this.ejectedTurrets = [];
     this.nextDecalId = 1;
     this.hazards = this.mission.hazards.map((hazard) => ({
       ...hazard,
@@ -628,6 +637,9 @@ export class TankGame {
       }
     } else {
       this.updateParticles(delta);
+      if (this.phase === "victory" || this.phase === "defeat") {
+        this.updateEjectedTurrets(delta);
+      }
     }
 
     this.canvas.dataset.visualTheme = this.mission.visualTheme;
@@ -635,6 +647,7 @@ export class TankGame {
     this.canvas.dataset.trackCount = String(this.trackMarks.length);
     this.canvas.dataset.decalCount = String(this.decals.length);
     this.canvas.dataset.wreckCount = String(this.wrecks.length);
+    this.canvas.dataset.ejectedTurretCount = String(this.ejectedTurrets.length);
     this.canvas.dataset.fps = String(this.fps);
     this.renderer.render({
       phase: this.phase,
@@ -655,6 +668,7 @@ export class TankGame {
       trackMarks: this.trackMarks,
       decals: this.decals,
       wrecks: this.wrecks,
+      ejectedTurrets: this.ejectedTurrets,
       theme: VISUAL_THEMES[this.mission.visualTheme],
       shake: this.shake,
       mouse: this.mouse,
@@ -777,6 +791,7 @@ export class TankGame {
     this.updateTrackMarks(delta);
     this.updateDecals(delta);
     this.updateWrecks(delta);
+    this.updateEjectedTurrets(delta);
     this.updateTankVisualStates(delta);
     this.updateObjective(delta);
     this.updateParticles(delta);
@@ -1746,6 +1761,9 @@ export class TankGame {
       burn: tank.kind === "boss" ? 1 : 0.55,
       life: WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
     }, VISUAL_CAPS.wrecks);
+    if (tank.kind !== "player" && Math.random() < EJECTED_TURRET_CHANCE) {
+      this.ejectTurret(tank);
+    }
     this.addDecal(
       "oil",
       tank.x - 4,
@@ -1769,6 +1787,43 @@ export class TankGame {
     this.wrecks = this.wrecks.filter((wreck) => {
       wreck.life -= delta;
       return wreck.life > 0;
+    });
+  }
+
+  private ejectTurret(tank: Tank): void {
+    if (tank.kind === "player") return;
+    const launchAngle = tank.lastHitDirection + ((Math.random() - 0.5) * Math.PI * 0.8);
+    const launchSpeed = (tank.kind === "boss" ? 116 : tank.kind === "heavy" ? 98 : 82)
+      * (0.88 + Math.random() * 0.24);
+    const spinDirection = Math.random() < 0.5 ? -1 : 1;
+    pushCapped(this.ejectedTurrets, {
+      id: tank.id,
+      kind: tank.kind,
+      x: tank.x,
+      y: tank.y,
+      angle: tank.turretAngle,
+      velocityX: Math.cos(launchAngle) * launchSpeed,
+      velocityY: Math.sin(launchAngle) * launchSpeed,
+      angularVelocity: spinDirection * (
+        EJECTED_TURRET_MIN_ANGULAR_VELOCITY
+          + Math.random() * (
+            EJECTED_TURRET_MAX_ANGULAR_VELOCITY
+              - EJECTED_TURRET_MIN_ANGULAR_VELOCITY
+          )
+      ),
+      height: tank.kind === "boss" ? 9 : 6,
+      verticalVelocity: (tank.kind === "boss" ? 82 : 68) + Math.random() * 12,
+      scale: tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1,
+      landed: false,
+      life: EJECTED_TURRET_SOLID_SECONDS + EJECTED_TURRET_FADE_SECONDS,
+      critical: tank.kind === "boss",
+    }, VISUAL_CAPS.ejectedTurrets);
+  }
+
+  private updateEjectedTurrets(delta: number): void {
+    this.ejectedTurrets = this.ejectedTurrets.filter((turret) => {
+      updateEjectedTurret(turret, delta);
+      return !turret.landed || turret.life > 0;
     });
   }
 

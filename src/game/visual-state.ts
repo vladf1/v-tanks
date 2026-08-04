@@ -56,8 +56,29 @@ export interface Wreck extends Point {
   critical?: boolean;
 }
 
+export interface EjectedTurret extends Point {
+  id: number;
+  kind: EnemyKind;
+  angle: number;
+  velocityX: number;
+  velocityY: number;
+  angularVelocity: number;
+  height: number;
+  verticalVelocity: number;
+  scale: number;
+  landed: boolean;
+  life: number;
+  critical?: boolean;
+}
+
 export const WRECK_SOLID_SECONDS = 20;
 export const WRECK_FADE_SECONDS = 8;
+export const EJECTED_TURRET_CHANCE = 0.25;
+export const EJECTED_TURRET_SOLID_SECONDS = 4;
+export const EJECTED_TURRET_FADE_SECONDS = 5;
+export const EJECTED_TURRET_GRAVITY = 110;
+export const EJECTED_TURRET_MIN_ANGULAR_VELOCITY = 2.8;
+export const EJECTED_TURRET_MAX_ANGULAR_VELOCITY = 4.6;
 export const GROUND_OVERSCAN = 64;
 
 export function getWreckOpacity(life: number): number {
@@ -65,11 +86,44 @@ export function getWreckOpacity(life: number): number {
   return Math.min(1, life / WRECK_FADE_SECONDS);
 }
 
+export function getEjectedTurretOpacity(life: number): number {
+  if (life <= 0) return 0;
+  return Math.min(1, life / EJECTED_TURRET_FADE_SECONDS);
+}
+
+export function updateEjectedTurret(turret: EjectedTurret, delta: number): void {
+  if (turret.landed) {
+    turret.life = Math.max(0, turret.life - delta);
+    return;
+  }
+
+  turret.x += turret.velocityX * delta;
+  turret.y += turret.velocityY * delta;
+  turret.angle += turret.angularVelocity * delta;
+  turret.height += turret.verticalVelocity * delta;
+  turret.verticalVelocity -= EJECTED_TURRET_GRAVITY * delta;
+
+  const travelDrag = Math.exp(-0.62 * delta);
+  turret.velocityX *= travelDrag;
+  turret.velocityY *= travelDrag;
+  turret.angularVelocity *= Math.exp(-0.16 * delta);
+
+  if (turret.height > 0 || turret.verticalVelocity >= 0) return;
+  turret.height = 0;
+  turret.velocityX = 0;
+  turret.velocityY = 0;
+  turret.verticalVelocity = 0;
+  turret.angularVelocity = 0;
+  turret.landed = true;
+  turret.life = EJECTED_TURRET_SOLID_SECONDS + EJECTED_TURRET_FADE_SECONDS;
+}
+
 export const VISUAL_CAPS = {
   particles: 700,
   trackMarks: 300,
   decals: 220,
   wrecks: 30,
+  ejectedTurrets: 30,
 } as const;
 
 export const VISUAL_THEMES: Record<VisualThemeKey, VisualTheme> = {
