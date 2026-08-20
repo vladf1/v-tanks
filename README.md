@@ -20,18 +20,25 @@ mission medals, daily seeded survival, synthesized sound, and high-DPI rendering
 
 ## Development
 
+Install [Bun](https://bun.com/docs/installation) 1.3.14 or newer, then install
+the locked dependencies and start Vite:
+
 ```bash
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Quality checks:
 
 ```bash
-npm test
-npm run build
-npm run render:tanks
+bun run test
+bun run build
+bun run render:tanks
 ```
+
+The committed `bunfig.toml` uses Bun's `copyfile` install backend so dependency
+installation remains reliable when the repository is stored on iCloud Drive.
+GitHub Pages builds use the same pinned Bun version and `bun.lock` via `bun ci`.
 
 The permanent visual gallery is available at `/debug/gallery.html` while the
 development server is running.

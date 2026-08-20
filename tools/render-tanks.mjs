@@ -111,7 +111,7 @@ const server = await createServer({
   server: {
     host: "127.0.0.1",
     port: 41731,
-    strictPort: false,
+    strictPort: true,
   },
 });
 

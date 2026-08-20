@@ -1,0 +1,4 @@
+[install]
+# The repository lives on iCloud Drive, where Bun's default macOS clonefile
+# backend can produce incomplete package directories.
+backend = "copyfile"
