@@ -133,6 +133,10 @@ export interface Projectile extends Point {
   ricocheted: boolean;
 }
 
+export interface ProjectileInterception extends Point {
+  time: number;
+}
+
 export interface Particle extends Point {
   kind: ParticleKind;
   velocityX: number;
@@ -185,6 +189,7 @@ export interface TrackMark extends Point {
 const PLAYER_SPEED = 184;
 const TANK_GUTTER = 24;
 const TAU = Math.PI * 2;
+export const PROJECTILE_INTERCEPTION_PADDING = 4;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -274,6 +279,45 @@ function segmentDistanceSquared(from: Point, to: Point, point: Point): number {
     { x: from.x + (dx * amount), y: from.y + (dy * amount) },
     point,
   );
+}
+
+export function findProjectileInterception(
+  first: Projectile,
+  second: Projectile,
+  padding = PROJECTILE_INTERCEPTION_PADDING,
+): ProjectileInterception | null {
+  if (first.owner === second.owner) return null;
+
+  const relativeStartX = first.previousX - second.previousX;
+  const relativeStartY = first.previousY - second.previousY;
+  const relativeStepX = (first.x - first.previousX) - (second.x - second.previousX);
+  const relativeStepY = (first.y - first.previousY) - (second.y - second.previousY);
+  const relativeSpeedSquared = (relativeStepX * relativeStepX) + (relativeStepY * relativeStepY);
+  const time = relativeSpeedSquared <= 0.0001
+    ? 0
+    : clamp(
+      -((relativeStartX * relativeStepX) + (relativeStartY * relativeStepY))
+        / relativeSpeedSquared,
+      0,
+      1,
+    );
+  const separationX = relativeStartX + (relativeStepX * time);
+  const separationY = relativeStartY + (relativeStepY * time);
+  const interceptionRadius = first.radius + second.radius + padding;
+  if (
+    (separationX * separationX) + (separationY * separationY)
+      > interceptionRadius * interceptionRadius
+  ) return null;
+
+  const firstX = first.previousX + ((first.x - first.previousX) * time);
+  const firstY = first.previousY + ((first.y - first.previousY) * time);
+  const secondX = second.previousX + ((second.x - second.previousX) * time);
+  const secondY = second.previousY + ((second.y - second.previousY) * time);
+  return {
+    x: (firstX + secondX) * 0.5,
+    y: (firstY + secondY) * 0.5,
+    time,
+  };
 }
 
 class SynthAudio {
@@ -1175,7 +1219,7 @@ export class TankGame {
   }
 
   private updateProjectiles(delta: number): void {
-    const remaining: Projectile[] = [];
+    const moved: Projectile[] = [];
     for (const projectile of this.projectiles) {
       projectile.life -= delta;
       if (projectile.life <= 0) {
@@ -1271,12 +1315,66 @@ export class TankGame {
 
       projectile.x = nextX;
       projectile.y = nextY;
+      moved.push(projectile);
+    }
+
+    const intercepted = this.resolveProjectileInterceptions(moved);
+    const remaining: Projectile[] = [];
+    for (const projectile of moved) {
+      if (intercepted.has(projectile)) continue;
       if (this.projectileHitsObjective(projectile)) continue;
       if (this.projectileHitsHazard(projectile)) continue;
       if (this.projectileHitsTank(projectile)) continue;
       remaining.push(projectile);
     }
     this.projectiles = remaining;
+  }
+
+  private resolveProjectileInterceptions(projectiles: Projectile[]): Set<Projectile> {
+    const collisions: Array<{
+      first: Projectile;
+      second: Projectile;
+      interception: ProjectileInterception;
+    }> = [];
+    for (let firstIndex = 0; firstIndex < projectiles.length; firstIndex += 1) {
+      const first = projectiles[firstIndex];
+      for (let secondIndex = firstIndex + 1; secondIndex < projectiles.length; secondIndex += 1) {
+        const second = projectiles[secondIndex];
+        const interception = findProjectileInterception(first, second);
+        if (interception) collisions.push({ first, second, interception });
+      }
+    }
+    collisions.sort((a, b) => a.interception.time - b.interception.time);
+
+    const intercepted = new Set<Projectile>();
+    for (const collision of collisions) {
+      if (intercepted.has(collision.first) || intercepted.has(collision.second)) continue;
+      intercepted.add(collision.first);
+      intercepted.add(collision.second);
+      const direction = Math.atan2(
+        collision.first.velocityY - collision.second.velocityY,
+        collision.first.velocityX - collision.second.velocityX,
+      );
+      this.spawnImpactParticles(
+        collision.interception.x,
+        collision.interception.y,
+        "#fff0b4",
+        12,
+        direction,
+        "spark",
+      );
+      this.spawnImpactParticles(
+        collision.interception.x,
+        collision.interception.y,
+        PLAYER_ACCENT,
+        5,
+        direction + Math.PI,
+        "spark",
+      );
+      this.shake = Math.max(this.shake, 0.75);
+    }
+    if (intercepted.size > 0) this.audio.impact();
+    return intercepted;
   }
 
   private projectileHitsTank(projectile: Projectile): boolean {
