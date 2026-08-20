@@ -702,6 +702,7 @@ export class GameRenderer {
       lastHitDirection: 0,
       smokeIntensity: 0,
       smokeCooldown: 0,
+      ultraAggressive: false,
     };
     context.save();
     const fade = getWreckOpacity(wreck.life);

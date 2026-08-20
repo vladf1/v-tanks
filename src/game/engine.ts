@@ -45,6 +45,12 @@ import {
   type Loadout,
 } from "./loadouts.ts";
 import {
+  getEnemyBehaviorProfile,
+  getEnemyMoveAngle,
+  getEnemyReloadSeconds,
+  isUltraAggressiveEnemy,
+} from "./enemy-behavior.ts";
+import {
   EJECTED_TURRET_CHANCE,
   EJECTED_TURRET_FADE_SECONDS,
   EJECTED_TURRET_MAX_ANGULAR_VELOCITY,
@@ -117,6 +123,11 @@ export interface Tank extends Point {
   lastHitDirection: number;
   smokeIntensity: number;
   smokeCooldown: number;
+  ultraAggressive: boolean;
+}
+
+export interface EnemyTank extends Tank {
+  kind: EnemyKind;
 }
 
 export interface Projectile extends Point {
@@ -425,7 +436,7 @@ export class TankGame {
   private phase: GamePhase = "menu";
   private loadout: Loadout = { cannon: "ricochet", chassis: "balanced", utility: "dash" };
   private player: Tank = this.createPlayer(this.mission.player);
-  private enemies: Tank[] = [];
+  private enemies: EnemyTank[] = [];
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
   private powerUps: PowerUp[] = [];
@@ -631,10 +642,11 @@ export class TankGame {
       lastHitDirection: 0,
       smokeIntensity: 0,
       smokeCooldown: 0,
+      ultraAggressive: false,
     };
   }
 
-  private createEnemy(kind: EnemyKind, position: Point): Tank {
+  private createEnemy(kind: EnemyKind, position: Point): EnemyTank {
     const id = this.nextEnemyId;
     this.nextEnemyId += 1;
     const maxHp = kind === "boss" ? 12 : kind === "heavy" ? 4 : kind === "support" ? 2 : 1;
@@ -663,6 +675,7 @@ export class TankGame {
       lastHitDirection: 0,
       smokeIntensity: 0,
       smokeCooldown: 0,
+      ultraAggressive: isUltraAggressiveEnemy(id, kind),
     };
   }
 
@@ -905,39 +918,34 @@ export class TankGame {
       const dy = this.player.y - enemy.y;
       const distance = Math.hypot(dx, dy);
       const targetAngle = Math.atan2(dy, dx);
-      const turnSpeed = enemy.kind === "sniper" || enemy.kind === "artillery"
-        ? 1.7
-        : enemy.kind === "boss" ? 2.6 : 3.3;
-      enemy.turretAngle = turnTowards(enemy.turretAngle, targetAngle, turnSpeed * delta);
+      const behavior = getEnemyBehaviorProfile(enemy.kind, enemy.ultraAggressive);
+      enemy.turretAngle = turnTowards(
+        enemy.turretAngle,
+        targetAngle,
+        behavior.turnSpeed * delta,
+      );
 
       const visible = hasLineOfSight(enemy, this.player, this.mission.walls);
-      const speed = enemy.kind === "scout"
-        ? 78
-        : enemy.kind === "guard" || enemy.kind === "minelayer" || enemy.kind === "support"
-          ? 48
-          : enemy.kind === "heavy" || enemy.kind === "boss" ? 34 : 0;
-      const preferredRange = enemy.kind === "scout"
-        ? 165
-        : enemy.kind === "boss" ? 245
-          : enemy.kind === "minelayer" ? 120
-            : enemy.kind === "support" ? 330 : 270;
-      let moveAngle = enemy.patrolAngle;
-
-      if (visible) {
-        if (distance > preferredRange + 35) {
-          moveAngle = targetAngle;
-        } else if (distance < preferredRange - 30) {
-          moveAngle = targetAngle + Math.PI;
-        } else {
-          moveAngle = targetAngle + (enemy.strafeDirection * Math.PI / 2);
-        }
-      } else {
+      if (!visible && !enemy.ultraAggressive) {
         enemy.patrolAngle += (0.35 + (enemy.id % 3) * 0.08) * delta * enemy.strafeDirection;
       }
+      const moveAngle = getEnemyMoveAngle({
+        ultraAggressive: enemy.ultraAggressive,
+        visible,
+        distance,
+        targetAngle,
+        patrolAngle: enemy.patrolAngle,
+        strafeDirection: enemy.strafeDirection,
+        preferredRange: behavior.preferredRange,
+      });
 
-      if (speed > 0) {
+      if (behavior.speed > 0) {
         enemy.hullAngle = turnTowards(enemy.hullAngle, moveAngle, delta * 3.8);
-        this.moveTank(enemy, Math.cos(moveAngle) * speed * delta, Math.sin(moveAngle) * speed * delta);
+        this.moveTank(
+          enemy,
+          Math.cos(moveAngle) * behavior.speed * delta,
+          Math.sin(moveAngle) * behavior.speed * delta,
+        );
         this.updateTankTracks(enemy, delta, this.getTrackColor("enemy"), 0.14);
       }
 
@@ -960,7 +968,12 @@ export class TankGame {
       const maxRange = enemy.kind === "sniper" || enemy.kind === "artillery"
         ? 710
         : enemy.kind === "boss" ? 560 : 455;
-      if (visible && distance < maxRange && aimDifference < 0.075 && enemy.cooldown <= 0) {
+      if (
+        visible
+        && distance < maxRange
+        && aimDifference < behavior.aimTolerance
+        && enemy.cooldown <= 0
+      ) {
         this.enemyShoot(enemy);
       }
     }
@@ -1003,7 +1016,9 @@ export class TankGame {
     );
     enemy.hullAngle = inwardAngle;
     enemy.turretAngle = inwardAngle;
-    enemy.cooldown = 1.1 + (Math.random() * 0.45);
+    enemy.cooldown = enemy.ultraAggressive
+      ? 0.5 + (Math.random() * 0.2)
+      : 1.1 + (Math.random() * 0.45);
     this.enemies.push(enemy);
     if (this.mode === "campaign") this.reinforcementsRemaining -= 1;
     this.reinforcementTimer = this.mode === "survival"
@@ -1089,9 +1104,13 @@ export class TankGame {
     }
   }
 
-  private enemyShoot(enemy: Tank): void {
+  private enemyShoot(enemy: EnemyTank): void {
+    enemy.cooldown = getEnemyReloadSeconds(
+      enemy.kind,
+      enemy.id,
+      enemy.ultraAggressive,
+    );
     if (enemy.kind === "artillery") {
-      enemy.cooldown = 3.4;
       this.artilleryStrikes.push({
         x: this.player.x,
         y: this.player.y,
@@ -1101,13 +1120,6 @@ export class TankGame {
       });
       return;
     }
-    const rate = enemy.kind === "scout"
-      ? 1.45
-      : enemy.kind === "guard" || enemy.kind === "support" ? 1.15
-        : enemy.kind === "sniper" ? 2.3
-          : enemy.kind === "heavy" ? 2.05
-            : enemy.kind === "minelayer" ? 1.75 : 0.72;
-    enemy.cooldown = rate + ((enemy.id % 3) * 0.11);
     const speed = enemy.kind === "sniper" ? 650 : enemy.kind === "boss" ? 410 : 390;
     const error = enemy.kind === "scout" ? Math.sin(this.elapsed * 4 + enemy.id) * 0.09 : 0;
     const bounces = enemy.kind === "sniper" || enemy.kind === "boss" ? 1 : 0;
