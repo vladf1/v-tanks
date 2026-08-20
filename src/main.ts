@@ -1,4 +1,4 @@
-import { VTanks } from "./game/VTanks";
+import { VTanks } from "./game/VTanks.ts";
 import "./style.css";
 
 const root = document.getElementById("root");

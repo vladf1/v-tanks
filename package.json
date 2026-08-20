@@ -2,17 +2,16 @@
   "name": "v-tanks",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "bun@1.3.14",
   "engines": {
-    "bun": ">=1.3.14"
+    "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "bunx --bun vite",
-    "build": "bunx --bun tsc --noEmit && bunx --bun vite build",
-    "build:pages": "bunx --bun tsc --noEmit && bunx --bun vite build --base=/v-tanks/",
-    "preview": "bunx --bun vite preview",
-    "render:tanks": "bun tools/render-tanks.mjs",
-    "test": "bun run build && bun test tests/*.test.mjs"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:pages": "tsc --noEmit && vite build --base=/v-tanks/",
+    "preview": "vite preview",
+    "render:tanks": "node tools/render-tanks.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "26.1.1",

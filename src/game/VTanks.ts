@@ -1,20 +1,20 @@
-import { TankGame, type GamePhase, type GameSnapshot } from "./engine";
-import { getMissionEnemyTotal, MISSIONS } from "./levels";
-import { GameRenderer } from "./renderer";
-import { POWER_UP_DEFINITIONS } from "./powerups";
+import { TankGame, type GamePhase, type GameSnapshot } from "./engine.ts";
+import { getMissionEnemyTotal, MISSIONS } from "./levels.ts";
+import { GameRenderer } from "./renderer.ts";
+import { POWER_UP_DEFINITIONS } from "./powerups.ts";
 import {
   CANNONS,
   CHASSIS,
   UTILITIES,
   type Loadout,
-} from "./loadouts";
+} from "./loadouts.ts";
 import {
   bestRecord,
   readCampaignSave,
   writeCampaignSave,
   type CampaignSave,
   type MissionRank,
-} from "./progress";
+} from "./progress.ts";
 import gameShell from "./v-tanks.html?raw";
 
 const INITIAL_SNAPSHOT: GameSnapshot = {
@@ -133,6 +133,7 @@ function requiredElement<T extends Element>(root: ParentNode, selector: string):
 }
 
 export class VTanks {
+  private readonly root: HTMLElement;
   private readonly shell: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly game: TankGame;
@@ -146,7 +147,8 @@ export class VTanks {
   private renderedSelectedMapIndex = -1;
   private renderedSelectedMapSize = "";
 
-  constructor(private readonly root: HTMLElement) {
+  constructor(root: HTMLElement) {
+    this.root = root;
     root.innerHTML = gameShell;
     requiredElement(root, ".mission-grid").innerHTML = missionCards();
     this.renderMissionCardMaps();

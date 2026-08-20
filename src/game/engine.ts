@@ -11,7 +11,7 @@ import {
   type HazardSpawn,
   type Point,
   type Wall,
-} from "./levels";
+} from "./levels.ts";
 import {
   findReinforcementEntry,
   getReinforcementDelay,
@@ -23,7 +23,7 @@ import {
   GameRenderer,
   PLAYER_ACCENT,
   PLAYER_COLOR,
-} from "./renderer";
+} from "./renderer.ts";
 import {
   POWER_UP_DEFINITIONS,
   absorbShieldDamage,
@@ -38,12 +38,12 @@ import {
   type ActivePowerUps,
   type PowerUp,
   type TimedPowerUpKind,
-} from "./powerups";
+} from "./powerups.ts";
 import {
   getCannonStats,
   getChassisStats,
   type Loadout,
-} from "./loadouts";
+} from "./loadouts.ts";
 import {
   EJECTED_TURRET_CHANCE,
   EJECTED_TURRET_FADE_SECONDS,
@@ -411,6 +411,7 @@ class SynthAudio {
 }
 
 export class TankGame {
+  private readonly canvas: HTMLCanvasElement;
   private readonly renderer: GameRenderer;
   private readonly keys = new Set<string>();
   private readonly audio = new SynthAudio();
@@ -463,10 +464,11 @@ export class TankGame {
   private fpsSampleFrames = 0;
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    canvas: HTMLCanvasElement,
     onSnapshot: (snapshot: GameSnapshot) => void,
     onPhase: (phase: GamePhase) => void,
   ) {
+    this.canvas = canvas;
     this.renderer = new GameRenderer(canvas);
     this.onSnapshot = onSnapshot;
     this.onPhase = onPhase;

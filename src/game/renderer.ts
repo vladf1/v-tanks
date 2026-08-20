@@ -7,7 +7,7 @@ import {
   type Mission,
   type Point,
   type Wall,
-} from "./levels";
+} from "./levels.ts";
 import type {
   ArtilleryStrike,
   GamePhase,
@@ -18,12 +18,12 @@ import type {
   ProximityMine,
   Tank,
   TrackMark,
-} from "./engine";
+} from "./engine.ts";
 import {
   POWER_UP_DEFINITIONS,
   type ActivePowerUps,
   type PowerUp,
-} from "./powerups";
+} from "./powerups.ts";
 import {
   GROUND_OVERSCAN,
   VISUAL_THEMES,
@@ -121,6 +121,7 @@ export interface RenderState {
 }
 
 export class GameRenderer {
+  private readonly canvas: HTMLCanvasElement;
   private readonly context: CanvasRenderingContext2D;
   private readonly resizeObserver: ResizeObserver;
   private displayScale = 1;
@@ -131,7 +132,8 @@ export class GameRenderer {
   private cameraY = 0;
   private activeTheme: VisualTheme = VISUAL_THEMES["proving-ground"];
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas 2D is unavailable.");
     this.context = context;
