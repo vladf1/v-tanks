@@ -1,4 +1,10 @@
-import { DEFAULT_LOADOUT, parseLoadout, type Loadout } from "./loadouts.ts";
+import {
+  DEFAULT_PLAYER_TANK,
+  inferPlayerTank,
+  parsePlayerTank,
+  type Loadout,
+  type PlayerTankKind,
+} from "./loadouts.ts";
 
 export type MissionRank = "S" | "A" | "B";
 
@@ -15,10 +21,10 @@ export interface GameSettings {
 }
 
 export interface CampaignSave {
-  version: 2;
+  version: 3;
   unlockedMission: number;
   records: Record<string, MissionRecord>;
-  loadout: Loadout;
+  tankClass: PlayerTankKind;
   survivalBest: number;
   settings: GameSettings;
 }
@@ -29,10 +35,10 @@ const LEGACY_PROGRESS_KEY = "v-tanks-campaign-v1";
 export function createDefaultSave(): CampaignSave {
   const legacy = Number.parseInt(localStorage.getItem(LEGACY_PROGRESS_KEY) ?? "0", 10);
   return {
-    version: 2,
+    version: 3,
     unlockedMission: Number.isFinite(legacy) ? Math.max(0, legacy) : 0,
     records: {},
-    loadout: { ...DEFAULT_LOADOUT },
+    tankClass: DEFAULT_PLAYER_TANK,
     survivalBest: 0,
     settings: {
       sound: true,
@@ -43,14 +49,19 @@ export function createDefaultSave(): CampaignSave {
 export function readCampaignSave(): CampaignSave {
   const fallback = createDefaultSave();
   try {
-    const stored = JSON.parse(localStorage.getItem(SAVE_KEY) ?? "null") as Partial<CampaignSave> | null;
-    if (!stored || stored.version !== 2) return fallback;
+    const stored = JSON.parse(localStorage.getItem(SAVE_KEY) ?? "null") as (
+      Omit<Partial<CampaignSave>, "version"> & { version?: number; loadout?: Loadout }
+    ) | null;
+    if (!stored || (stored.version !== 2 && stored.version !== 3)) return fallback;
     return {
       ...fallback,
       ...stored,
+      version: 3,
       unlockedMission: Math.max(0, stored.unlockedMission ?? fallback.unlockedMission),
       records: stored.records ?? {},
-      loadout: parseLoadout(stored.loadout),
+      tankClass: stored.version === 2
+        ? inferPlayerTank(stored.loadout)
+        : parsePlayerTank(stored.tankClass),
       settings: {
         sound: stored.settings?.sound ?? fallback.settings.sound,
       },

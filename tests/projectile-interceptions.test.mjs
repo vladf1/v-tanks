@@ -27,6 +27,7 @@ function projectile({
     damage: 1,
     color: "#fff",
     ricocheted: false,
+    ignoresProjectiles: false,
   };
 }
 
@@ -57,4 +58,11 @@ test("friendly projectiles never destroy each other", () => {
   const second = projectile({ owner: "enemy", previousX: 120, x: 80 });
 
   assert.equal(findProjectileInterception(first, second), null);
+});
+
+test("piercing rounds pass through incoming projectiles", () => {
+  const piercing = projectile({ owner: "player", previousX: 80, x: 120 });
+  piercing.ignoresProjectiles = true;
+  const enemy = projectile({ owner: "enemy", previousX: 120, x: 80 });
+  assert.equal(findProjectileInterception(piercing, enemy), null);
 });

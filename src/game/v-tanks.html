@@ -38,9 +38,9 @@
     <div class="armor-pips"></div>
     <span class="bonus-status" data-bonus-status></span>
   </section>
-  <section class="combat-status combat-status-right" data-combat hidden aria-label="Dash charge">
-    <span class="status-label">DASH / SHIFT · <span data-utility-status></span></span>
-    <div class="dash-track"><i data-dash-charge></i></div>
+  <section class="combat-status combat-status-right" data-combat hidden aria-label="Secondary ability charge">
+    <span class="status-label"><span data-ability-label></span> / RMB · <span data-ability-status></span></span>
+    <div class="dash-track"><i data-ability-charge></i></div>
   </section>
   <section class="boss-readout" data-boss hidden>
     <span>OMEGA CORE<span data-boss-phase></span></span>
@@ -49,6 +49,10 @@
   <section class="powerup-readout" data-powerup-readout hidden aria-label="Active power-ups">
     <span>ACTIVE SYSTEMS</span>
     <div data-active-powerups></div>
+  </section>
+  <section class="ammo-readout" data-combat hidden aria-label="Ammunition inventory">
+    <span>AMMUNITION / WHEEL OR 1–4</span>
+    <div data-ammunition></div>
   </section>
   <section class="mission-tip" data-combat hidden aria-live="polite">
     <span data-tip-title>FIELD DIRECTIVE</span>
@@ -62,8 +66,8 @@
     <span><kbd>WASD</kbd> MOVE</span>
     <span><kbd>MOUSE</kbd> AIM</span>
     <span><kbd>LMB</kbd> HOLD FIRE</span>
-    <span><kbd>SHIFT</kbd> DASH</span>
-    <span><kbd>E</kbd> UTILITY</span>
+    <span><kbd>WHEEL</kbd> AMMO</span>
+    <span><kbd>RMB</kbd> ABILITY</span>
     <span><kbd>R</kbd> RESTART</span>
   </div>
 
@@ -76,19 +80,19 @@
       </p>
       <div class="feature-line">
         <span>01</span>
-        <p><strong>MOVE FAST</strong> — break sightlines and force bad shots.</p>
+        <p><strong>OBJECTIVE</strong> is how you win; hostiles may be secondary.</p>
       </div>
       <div class="feature-line">
         <span>02</span>
-        <p><strong>USE THE WALLS</strong> — every shell carries one ricochet.</p>
+        <p><strong>THREAT</strong> estimates enemy pressure; <strong>PAR</strong> is the target clear time.</p>
       </div>
       <div class="feature-line">
         <span>03</span>
-        <p><strong>COUNTERFIRE</strong> — your shells can intercept incoming fire.</p>
+        <p><strong>BONUS</strong> is optional and improves your mission record.</p>
       </div>
       <div class="feature-line">
         <span>04</span>
-        <p><strong>READ THE ROOM</strong> — each enemy has a different rhythm.</p>
+        <p><strong>AMMO</strong> packs unlock limited special shells; scroll to swap.</p>
       </div>
       <div class="desktop-tag">DESKTOP ONLY / KEYBOARD + MOUSE</div>
     </div>
@@ -119,23 +123,12 @@
           <div><dt>BONUS</dt><dd data-selected-bonus></dd></div>
         </dl>
       </div>
-      <div class="loadout-panel">
+      <div class="loadout-panel tank-class-panel">
         <div class="loadout-heading">
-          <span>PRE-MISSION LOADOUT</span>
-          <small>SIDEGRADES / NO GRIND</small>
+          <span>CHOOSE YOUR TANK</span>
+          <small>RIGHT CLICK = CLASS ABILITY</small>
         </div>
-        <div class="loadout-row">
-          <b>CANNON</b>
-          <div data-loadout-options="cannon"></div>
-        </div>
-        <div class="loadout-row">
-          <b>CHASSIS</b>
-          <div data-loadout-options="chassis"></div>
-        </div>
-        <div class="loadout-row">
-          <b>UTILITY</b>
-          <div data-loadout-options="utility"></div>
-        </div>
+        <div class="tank-class-grid" data-tank-classes></div>
       </div>
       <button class="primary-button" data-action="deploy">
         <span>DEPLOY</span>

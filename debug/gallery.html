@@ -245,11 +245,15 @@
         POWER_UP_DEFINITIONS,
         POWER_UP_KINDS,
       } from "/src/game/powerups.ts";
+      import { AMMO_DEFINITIONS, AMMO_KINDS } from "/src/game/ammunition.ts";
       import { MISSIONS } from "/src/game/levels.ts";
       import { VISUAL_THEMES } from "/src/game/visual-state.ts";
 
       const tankVariants = [
-        { kind: "player", label: "Player", model: "Abrams", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
+        { kind: "player", playerClass: "raptor", label: "Player", model: "Raptor / overdrive", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
+        { kind: "player", playerClass: "vanguard", label: "Player", model: "Vanguard / arc pulse", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
+        { kind: "player", playerClass: "bulwark", label: "Player", model: "Bulwark / aegis", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
+        { kind: "player", playerClass: "sapper", label: "Player", model: "Sapper / mines", color: PLAYER_COLOR, accent: PLAYER_ACCENT, radius: 15 },
         { kind: "scout", label: "Enemy", model: "Scout", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
         { kind: "guard", label: "Enemy", model: "Guard", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
         { kind: "sniper", label: "Enemy", model: "Sniper", color: ENEMY_COLOR, accent: ENEMY_ACCENT, radius: 15 },
@@ -349,6 +353,8 @@
             lastHitDirection: 0,
             smokeIntensity: 0,
             smokeCooldown: 0,
+            stunned: variant.kind === "support" ? 1 : 0,
+            playerClass: variant.playerClass,
           };
           GameRenderer.renderTankPreview(context, tank, variant.color, variant.accent);
         });
@@ -384,6 +390,25 @@
           radius: 15,
           active: true,
         }, 1.25);
+      });
+
+      AMMO_KINDS.filter((kind) => kind !== "basic").forEach((kind, index) => {
+        const definition = AMMO_DEFINITIONS[kind];
+        const { figure, canvas } = createCard(
+          `${definition.label} Pack`,
+          `+${definition.packSize} rounds`,
+          "obstacle",
+        );
+        powerUpsRoot.append(figure);
+        const context = prepareCanvas(canvas, 120, 60, 3);
+        GameRenderer.renderAmmoPackPreview(context, {
+          id: index,
+          kind,
+          x: 60,
+          y: 27,
+          radius: 16,
+          active: true,
+        }, 1.4);
       });
 
       const hazardKinds = ["barrel", "mud", "minefield", "repair-station", "barricade"];
@@ -438,6 +463,8 @@
             y: 30,
             armTime: 0,
             life: 10,
+            radius: 9,
+            fieldMine: false,
           }, 1.25);
         }
       }
@@ -455,25 +482,33 @@
         });
       }
 
-      const projectileCard = createCard("Projectiles", "Player and enemy fire", "obstacle");
+      const projectileCard = createCard("Projectiles", "STD / AP / HE / EMP", "obstacle");
       effectsRoot.append(projectileCard.figure);
       {
         const context = prepareCanvas(projectileCard.canvas, 120, 60, 3);
-        for (const [index, color] of [PLAYER_COLOR, ENEMY_ACCENT].entries()) {
+        for (const [index, kind] of AMMO_KINDS.entries()) {
+          const definition = AMMO_DEFINITIONS[kind];
           GameRenderer.renderProjectilePreview(context, {
-            x: 40 + index * 45,
-            y: 22 + index * 17,
+            x: 24 + (index % 2) * 58,
+            y: 19 + Math.floor(index / 2) * 24,
             previousX: 0,
             previousY: 0,
             velocityX: 260,
             velocityY: index === 0 ? -40 : 40,
-            owner: index === 0 ? "player" : "enemy",
+            owner: "player",
             life: 1,
             bounces: index,
             damage: 1,
             radius: 2.6,
-            color,
+            color: definition.color,
             ricocheted: index === 0,
+            kind,
+            penetrations: definition.penetrations,
+            hitTankIds: [],
+            ignoresProjectiles: definition.ignoresProjectiles,
+            explosionRadius: definition.explosionRadius,
+            stunRadius: definition.stunRadius,
+            stunSeconds: definition.stunSeconds,
           });
         }
       }
@@ -527,6 +562,7 @@
           lastHitDirection: 0,
           smokeIntensity: 0,
           smokeCooldown: 0,
+          stunned: 0,
         };
         GameRenderer.renderBossArmorPreview(context, boss, 0.8);
       }
@@ -554,12 +590,12 @@
         const severe = index >= 2;
         const card = createCard(`${variant.model} damage`, severe ? "Below 25%" : "Below 50%", "obstacle");
         historyRoot.append(card.figure);
-        const context = prepareCanvas(card.canvas, 120, 60, 3);
+        const context = prepareCanvas(card.canvas, 120, 95, 3);
         GameRenderer.renderDamageStatePreview(context, {
           id: index,
           kind: variant.kind,
           x: 43,
-          y: 30,
+          y: 54,
           radius: variant.radius,
           hullAngle: 0,
           turretAngle: 0,
@@ -580,11 +616,13 @@
           lastHitDirection: -0.35,
           smokeIntensity: severe ? 0.9 : 0.36,
           smokeCooldown: 0,
+          stunned: kind === "support" ? 1.8 : 0,
+          playerClass: variant.playerClass,
         }, variant.color, variant.accent);
         GameRenderer.renderEffectPreview(context, {
           kind: "smoke",
           x: 45,
-          y: 20,
+          y: 42,
           velocityX: 0,
           velocityY: -8,
           life: 0.8,

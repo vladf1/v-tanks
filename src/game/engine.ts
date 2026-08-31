@@ -25,12 +25,24 @@ import {
   PLAYER_COLOR,
 } from "./renderer.ts";
 import {
+  AMMO_KINDS,
+  AMMO_DEFINITIONS,
+  addAmmo,
+  createAmmoInventory,
+  cycleAmmo,
+  getAmmoSnapshots,
+  placeMissionAmmoPacks,
+  type AmmoInventory,
+  type AmmoKind,
+  type AmmoPack,
+  type AmmoSnapshot,
+} from "./ammunition.ts";
+import {
   POWER_UP_DEFINITIONS,
   absorbShieldDamage,
   activateTimedPowerUp,
   createActivePowerUps,
   getActivePowerUpSnapshots,
-  getPlayerShellStats,
   getPlayerSpeedMultiplier,
   placeMissionPowerUps,
   tickActivePowerUps,
@@ -41,8 +53,9 @@ import {
 } from "./powerups.ts";
 import {
   getCannonStats,
-  getChassisStats,
+  PLAYER_TANKS,
   type Loadout,
+  type PlayerTankKind,
 } from "./loadouts.ts";
 import {
   getEnemyBehaviorProfile,
@@ -85,7 +98,11 @@ export interface GameSnapshot {
   elapsed: number;
   shots: number;
   hits: number;
-  dashReady: number;
+  abilityReady: number;
+  abilityLabel: string;
+  abilityCharges: number;
+  selectedAmmo: AmmoKind;
+  ammunition: AmmoSnapshot[];
   bossHealth: number | null;
   bossPhase: number | null;
   activePowerUps: ActivePowerUpSnapshot[];
@@ -96,7 +113,6 @@ export interface GameSnapshot {
   bonusComplete: boolean;
   score: number;
   wave: number;
-  utilityCharges: number;
   fps: number;
 }
 
@@ -124,6 +140,8 @@ export interface Tank extends Point {
   smokeIntensity: number;
   smokeCooldown: number;
   ultraAggressive: boolean;
+  stunned: number;
+  playerClass?: PlayerTankKind;
 }
 
 export interface EnemyTank extends Tank {
@@ -142,6 +160,13 @@ export interface Projectile extends Point {
   radius: number;
   color: string;
   ricocheted: boolean;
+  kind: AmmoKind;
+  penetrations: number;
+  hitTankIds: number[];
+  ignoresProjectiles: boolean;
+  explosionRadius: number;
+  stunRadius: number;
+  stunSeconds: number;
 }
 
 export interface ProjectileInterception extends Point {
@@ -179,6 +204,8 @@ export interface ProximityMine extends Point {
   owner: "player" | "enemy";
   armTime: number;
   life: number;
+  radius: number;
+  fieldMine: boolean;
 }
 
 export interface ArtilleryStrike extends Point {
@@ -298,6 +325,7 @@ export function findProjectileInterception(
   padding = PROJECTILE_INTERCEPTION_PADDING,
 ): ProjectileInterception | null {
   if (first.owner === second.owner) return null;
+  if (first.ignoresProjectiles || second.ignoresProjectiles) return null;
 
   const relativeStartX = first.previousX - second.previousX;
   const relativeStartY = first.previousY - second.previousY;
@@ -329,6 +357,26 @@ export function findProjectileInterception(
     y: (firstY + secondY) * 0.5,
     time,
   };
+}
+
+export function createMinefieldMines(hazards: HazardSpawn[]): ProximityMine[] {
+  return hazards.flatMap((hazard) => {
+    if (hazard.kind !== "minefield") return [];
+    return Array.from({ length: 5 }, (_, index) => {
+      const angle = (index / 5) * TAU + hazard.id * 0.73;
+      const distance = index === 0 ? 0 : 23 + (index % 2) * 6;
+      return {
+        id: hazard.id * 10 + index,
+        owner: "enemy" as const,
+        x: hazard.x + Math.cos(angle) * distance,
+        y: hazard.y + Math.sin(angle) * distance,
+        armTime: 0,
+        life: Number.POSITIVE_INFINITY,
+        radius: 9,
+        fieldMine: true,
+      };
+    });
+  });
 }
 
 class SynthAudio {
@@ -434,12 +482,16 @@ export class TankGame {
   private missionIndex = 0;
   private mode: GameMode = "campaign";
   private phase: GamePhase = "menu";
-  private loadout: Loadout = { cannon: "ricochet", chassis: "balanced", utility: "dash" };
+  private playerTank: PlayerTankKind = "vanguard";
+  private loadout: Loadout = { ...PLAYER_TANKS.vanguard.loadout };
   private player: Tank = this.createPlayer(this.mission.player);
   private enemies: EnemyTank[] = [];
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
   private powerUps: PowerUp[] = [];
+  private ammoPacks: AmmoPack[] = [];
+  private ammunition: AmmoInventory = createAmmoInventory();
+  private selectedAmmo: AmmoKind = "basic";
   private activePowerUps: ActivePowerUps = createActivePowerUps();
   private mouse = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
   private pointerClient: Point | null = null;
@@ -498,8 +550,9 @@ export class TankGame {
     this.audio.setEnabled(enabled);
   }
 
-  configure(loadout: Loadout): void {
-    this.loadout = { ...loadout };
+  configure(playerTank: PlayerTankKind): void {
+    this.playerTank = playerTank;
+    this.loadout = { ...PLAYER_TANKS[playerTank].loadout };
   }
 
   showMenu(): void {
@@ -529,8 +582,10 @@ export class TankGame {
     this.reinforcementsRemaining = this.mission.reinforcements.count;
     this.reinforcementTimer = getReinforcementDelay(this.mission);
     this.powerUps = placeMissionPowerUps(this.mission);
+    this.ammoPacks = placeMissionAmmoPacks(this.mission);
+    this.ammunition = createAmmoInventory();
+    this.selectedAmmo = "basic";
     this.activePowerUps = createActivePowerUps();
-    if (this.loadout.utility === "shield") activateTimedPowerUp(this.activePowerUps, "shield");
     this.primaryFireHeld = false;
     this.mouse = { x: this.player.x + 180, y: this.player.y };
     this.phase = "playing";
@@ -550,8 +605,10 @@ export class TankGame {
     this.reinforcementsRemaining = Number.MAX_SAFE_INTEGER;
     this.reinforcementTimer = 1;
     this.powerUps = placeMissionPowerUps(this.mission, this.survivalRandom);
+    this.ammoPacks = placeMissionAmmoPacks(this.mission, this.survivalRandom);
+    this.ammunition = createAmmoInventory();
+    this.selectedAmmo = "basic";
     this.activePowerUps = createActivePowerUps();
-    if (this.loadout.utility === "shield") activateTimedPowerUp(this.activePowerUps, "shield");
     this.mouse = { x: this.player.x + 180, y: this.player.y };
     this.phase = "playing";
     this.onPhase(this.phase);
@@ -561,14 +618,14 @@ export class TankGame {
   private resetOperationState(): void {
     this.projectiles = [];
     this.particles = [];
-    this.mines = [];
+    this.mines = createMinefieldMines(this.mission.hazards);
     this.artilleryStrikes = [];
     this.trackMarks = [];
     this.decals = generateEnvironmentalDetails(this.mission);
     this.wrecks = [];
     this.ejectedTurrets = [];
     this.nextDecalId = 1;
-    this.hazards = this.mission.hazards.map((hazard) => ({
+    this.hazards = this.mission.hazards.filter((hazard) => hazard.kind !== "minefield").map((hazard) => ({
       ...hazard,
       active: true,
       cooldown: 0,
@@ -595,7 +652,7 @@ export class TankGame {
     this.wave = 1;
     this.holdProgress = 0;
     this.clearTimer = 0;
-    this.utilityCharges = this.loadout.utility === "mine" ? 3 : 0;
+    this.utilityCharges = PLAYER_TANKS[this.playerTank].mineCharges;
     this.shake = 0;
   }
 
@@ -616,7 +673,7 @@ export class TankGame {
   }
 
   private createPlayer(position: Point): Tank {
-    const chassis = getChassisStats(this.loadout.chassis);
+    const definition = PLAYER_TANKS[this.playerTank];
     return {
       id: -1,
       kind: "player",
@@ -625,8 +682,8 @@ export class TankGame {
       radius: STANDARD_TANK_RADIUS,
       hullAngle: 0,
       turretAngle: 0,
-      hp: chassis.hp,
-      maxHp: chassis.hp,
+      hp: definition.hp,
+      maxHp: definition.hp,
       cooldown: 0,
       dashCooldown: 0,
       invulnerable: 0,
@@ -643,13 +700,15 @@ export class TankGame {
       smokeIntensity: 0,
       smokeCooldown: 0,
       ultraAggressive: false,
+      stunned: 0,
+      playerClass: this.playerTank,
     };
   }
 
   private createEnemy(kind: EnemyKind, position: Point): EnemyTank {
     const id = this.nextEnemyId;
     this.nextEnemyId += 1;
-    const maxHp = kind === "boss" ? 12 : kind === "heavy" ? 4 : kind === "support" ? 2 : 1;
+    const maxHp = kind === "boss" ? 15 : kind === "heavy" ? 5 : kind === "support" ? 3 : 2;
     return {
       id,
       kind,
@@ -676,6 +735,7 @@ export class TankGame {
       smokeIntensity: 0,
       smokeCooldown: 0,
       ultraAggressive: isUltraAggressiveEnemy(id, kind),
+      stunned: 0,
     };
   }
 
@@ -716,6 +776,7 @@ export class TankGame {
       projectiles: this.projectiles,
       particles: this.particles,
       powerUps: this.powerUps,
+      ammoPacks: this.ammoPacks,
       activePowerUps: this.activePowerUps,
       objectiveNodes: this.objectiveNodes,
       uplinkSecondsRemaining: this.mission.objective.kind === "hold"
@@ -761,6 +822,7 @@ export class TankGame {
     window.addEventListener("pointercancel", this.onPointerCancel);
     window.addEventListener("blur", this.onWindowBlur);
     this.canvas.addEventListener("contextmenu", this.onContextMenu);
+    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
   }
 
   private unbindEvents(): void {
@@ -772,6 +834,7 @@ export class TankGame {
     window.removeEventListener("pointercancel", this.onPointerCancel);
     window.removeEventListener("blur", this.onWindowBlur);
     this.canvas.removeEventListener("contextmenu", this.onContextMenu);
+    this.canvas.removeEventListener("wheel", this.onWheel);
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
@@ -787,8 +850,13 @@ export class TankGame {
     if (key === "r" && ["playing", "paused", "defeat", "victory"].includes(this.phase)) {
       this.startMission(this.missionIndex);
     }
-    if (key === "shift") this.tryDash();
-    if (key === "e") this.tryDeployMine();
+    if (key === "shift" || key === "e") this.trySecondaryAction();
+    const ammoIndex = Number.parseInt(key, 10) - 1;
+    if (ammoIndex >= 0 && ammoIndex < AMMO_KINDS.length) {
+      const kind = AMMO_KINDS[ammoIndex];
+      if (this.ammunition[kind] > 0) this.selectedAmmo = kind;
+      this.publishSnapshot();
+    }
   };
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
@@ -810,7 +878,7 @@ export class TankGame {
       this.primaryFireHeld = true;
       this.tryPlayerShoot();
     }
-    if (event.button === 2) this.tryDash();
+    if (event.button === 2) this.trySecondaryAction();
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {
@@ -830,6 +898,13 @@ export class TankGame {
     event.preventDefault();
   };
 
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (this.phase !== "playing") return;
+    event.preventDefault();
+    this.selectedAmmo = cycleAmmo(this.selectedAmmo, event.deltaY >= 0 ? 1 : -1, this.ammunition);
+    this.publishSnapshot();
+  };
+
   private update(delta: number): void {
     this.elapsed += delta;
     this.snapshotTimer -= delta;
@@ -841,6 +916,7 @@ export class TankGame {
 
     this.updatePlayer(delta);
     this.collectPowerUps();
+    this.collectAmmoPacks();
     this.updateEnemies(delta);
     this.updateProjectiles(delta);
     this.updateReinforcements(delta);
@@ -891,9 +967,8 @@ export class TankGame {
           && hazard.kind === "mud"
           && distanceSquared(this.player, hazard) < hazard.radius * hazard.radius
       ));
-      const chassis = getChassisStats(this.loadout.chassis);
       const speed = PLAYER_SPEED
-        * chassis.speed
+        * PLAYER_TANKS[this.playerTank].speed
         * getPlayerSpeedMultiplier(this.activePowerUps)
         * (inMud ? 0.58 : 1);
       this.moveTank(this.player, movementX * speed * delta, movementY * speed * delta);
@@ -914,6 +989,7 @@ export class TankGame {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
       enemy.cooldown = Math.max(0, enemy.cooldown - delta);
+      if (enemy.stunned > 0) continue;
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const distance = Math.hypot(dx, dy);
@@ -960,6 +1036,8 @@ export class TankGame {
             y: enemy.y,
             armTime: 0.8,
             life: 18,
+            radius: 9,
+            fieldMine: false,
           });
           enemy.dashCooldown = 4.8;
         }
@@ -1064,19 +1142,25 @@ export class TankGame {
   private tryPlayerShoot(): void {
     if (this.phase !== "playing" || this.player.cooldown > 0 || !this.player.alive) return;
     const cannon = getCannonStats(this.loadout.cannon);
+    const ammoKind = this.ammunition[this.selectedAmmo] > 0 ? this.selectedAmmo : "basic";
+    const ammo = AMMO_DEFINITIONS[ammoKind];
     this.player.cooldown = this.activePowerUps.gun > 0
       ? cannon.reload * 0.5
       : cannon.reload;
     this.shots += 1;
-    const boostedShell = getPlayerShellStats(this.activePowerUps);
     this.spawnProjectile(
       this.player,
       this.player.turretAngle,
       "player",
-      cannon.speed,
-      cannon.bounces + (this.activePowerUps.ricochet > 0 ? 2 : 0),
-      cannon.damage * boostedShell.damage,
+      cannon.speed * ammo.speedMultiplier,
+      (ammo.bounces ?? cannon.bounces) + (this.activePowerUps.ricochet > 0 ? 2 : 0),
+      cannon.damage * ammo.damageMultiplier * (this.activePowerUps.ricochet > 0 ? 2 : 1),
+      ammoKind,
     );
+    if (ammoKind !== "basic") {
+      this.ammunition[ammoKind] -= 1;
+      if (this.ammunition[ammoKind] <= 0) this.selectedAmmo = "basic";
+    }
     this.audio.shoot(this.loadout.cannon);
   }
 
@@ -1104,6 +1188,20 @@ export class TankGame {
     }
   }
 
+  private collectAmmoPacks(): void {
+    for (const pack of this.ammoPacks) {
+      if (!pack.active) continue;
+      const radius = this.player.radius + pack.radius;
+      if (distanceSquared(this.player, pack) > radius * radius) continue;
+      pack.active = false;
+      addAmmo(this.ammunition, pack.kind);
+      this.selectedAmmo = pack.kind;
+      this.spawnExplosion(pack.x, pack.y, 15, AMMO_DEFINITIONS[pack.kind].color);
+      this.audio.powerUp();
+      this.publishSnapshot();
+    }
+  }
+
   private enemyShoot(enemy: EnemyTank): void {
     enemy.cooldown = getEnemyReloadSeconds(
       enemy.kind,
@@ -1125,11 +1223,11 @@ export class TankGame {
     const bounces = enemy.kind === "sniper" || enemy.kind === "boss" ? 1 : 0;
     const damage = enemy.kind === "heavy" ? 2 : 1;
     this.spawnProjectile(enemy, enemy.turretAngle + error, "enemy", speed, bounces, damage);
-    if (enemy.kind === "boss" && enemy.hp <= 8 && enemy.hp > 4) {
+    if (enemy.kind === "boss" && enemy.hp <= enemy.maxHp * (2 / 3) && enemy.hp > enemy.maxHp / 3) {
       this.spawnProjectile(enemy, enemy.turretAngle - 0.12, "enemy", speed, 0, 1);
       this.spawnProjectile(enemy, enemy.turretAngle + 0.12, "enemy", speed, 0, 1);
     }
-    if (enemy.kind === "boss" && enemy.hp <= 4) {
+    if (enemy.kind === "boss" && enemy.hp <= enemy.maxHp / 3) {
       this.spawnProjectile(enemy, enemy.turretAngle - 0.18, "enemy", speed, 0, 1);
       this.spawnProjectile(enemy, enemy.turretAngle + 0.18, "enemy", speed, 0, 1);
       this.spawnProjectile(enemy, enemy.turretAngle + Math.PI, "enemy", speed, 1, 1);
@@ -1144,7 +1242,9 @@ export class TankGame {
     speed: number,
     bounces: number,
     damage: number,
+    kind: AmmoKind = "basic",
   ): void {
+    const ammo = AMMO_DEFINITIONS[kind];
     const heavyShot = tank.kind === "boss"
       || tank.kind === "heavy"
       || tank.kind === "artillery"
@@ -1169,11 +1269,25 @@ export class TankGame {
       damage,
       radius: owner === "player" ? 4 : 4.5,
       color: owner === "player"
-        ? PLAYER_COLOR
+        ? ammo.color
         : "#ff8c7d",
       ricocheted: false,
+      kind,
+      penetrations: ammo.penetrations,
+      hitTankIds: [],
+      ignoresProjectiles: owner === "player" && ammo.ignoresProjectiles,
+      explosionRadius: owner === "player" ? ammo.explosionRadius : 0,
+      stunRadius: owner === "player" ? ammo.stunRadius : 0,
+      stunSeconds: owner === "player" ? ammo.stunSeconds : 0,
     });
     this.spawnMuzzleParticles(x, y, angle, owner === "player" ? PLAYER_ACCENT : ENEMY_ACCENT);
+  }
+
+  private trySecondaryAction(): void {
+    if (this.loadout.utility === "dash") this.tryDash();
+    else if (this.loadout.utility === "shield") this.tryShield();
+    else if (this.loadout.utility === "shock") this.tryShock();
+    else this.tryDeployMine();
   }
 
   private tryDash(): void {
@@ -1191,7 +1305,7 @@ export class TankGame {
     const length = Math.hypot(dx, dy);
     dx /= length;
     dy /= length;
-    this.player.dashCooldown = this.loadout.utility === "dash" ? 2.6 : 3.8;
+    this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
     this.player.invulnerable = Math.max(this.player.invulnerable, 0.28);
     for (let step = 0; step < 8; step += 1) this.moveTank(this.player, dx * 9, dy * 9);
     const dashDustCount = 12;
@@ -1212,10 +1326,48 @@ export class TankGame {
     this.audio.dash();
   }
 
+  private tryShield(): void {
+    if (this.phase !== "playing" || this.player.dashCooldown > 0 || !this.player.alive) return;
+    this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
+    activateTimedPowerUp(this.activePowerUps, "shield");
+    this.spawnShieldArc(this.player.x, this.player.y, POWER_UP_DEFINITIONS.shield.color);
+    this.audio.powerUp();
+    this.publishSnapshot();
+  }
+
+  private tryShock(): void {
+    if (this.phase !== "playing" || this.player.dashCooldown > 0 || !this.player.alive) return;
+    this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
+    const radius = 170;
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || distanceSquared(enemy, this.player) > radius * radius) continue;
+      enemy.stunned = Math.max(enemy.stunned, 2.65);
+    }
+    for (let index = 0; index < 28; index += 1) {
+      const angle = (index / 28) * TAU + Math.random() * 0.08;
+      this.addParticle({
+        kind: index % 3 === 0 ? "ring" : "spark",
+        x: this.player.x + Math.cos(angle) * (20 + Math.random() * 125),
+        y: this.player.y + Math.sin(angle) * (20 + Math.random() * 125),
+        velocityX: Math.cos(angle) * 42,
+        velocityY: Math.sin(angle) * 42,
+        life: 0.35 + Math.random() * 0.25,
+        maxLife: 0.6,
+        size: index % 3 === 0 ? 8 : 2.5,
+        color: "#7bdcff",
+        angle,
+      });
+    }
+    this.shake = Math.max(this.shake, 1.5);
+    this.audio.powerUp();
+    this.publishSnapshot();
+  }
+
   private tryDeployMine(): void {
     if (
       this.phase !== "playing"
       || this.loadout.utility !== "mine"
+      || this.player.dashCooldown > 0
       || this.utilityCharges <= 0
       || !this.player.alive
     ) return;
@@ -1227,7 +1379,10 @@ export class TankGame {
       y: this.player.y,
       armTime: 0.45,
       life: 25,
+      radius: 9,
+      fieldMine: false,
     });
+    this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
     this.audio.powerUp();
     this.publishSnapshot();
   }
@@ -1324,7 +1479,11 @@ export class TankGame {
           );
           this.addDecal("wall-chip", projectile.x, projectile.y, 7, "#c4beb0", reflectedDirection);
         }
-        if (projectile.bounces < 0) continue;
+        if (projectile.bounces < 0) {
+          if (projectile.explosionRadius > 0) this.applyExplosiveImpact(projectile, -1);
+          if (projectile.stunRadius > 0) this.applyEmpImpact(projectile);
+          continue;
+        }
       }
 
       projectile.x = nextX;
@@ -1337,6 +1496,7 @@ export class TankGame {
     for (const projectile of moved) {
       if (intercepted.has(projectile)) continue;
       if (this.projectileHitsObjective(projectile)) continue;
+      if (this.projectileHitsMine(projectile)) continue;
       if (this.projectileHitsHazard(projectile)) continue;
       if (this.projectileHitsTank(projectile)) continue;
       remaining.push(projectile);
@@ -1410,6 +1570,7 @@ export class TankGame {
 
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+      if (projectile.hitTankIds.includes(enemy.id)) continue;
       const radius = projectile.radius + enemy.radius;
       if (segmentDistanceSquared(projectile, { x: projectile.previousX, y: projectile.previousY }, enemy) > radius * radius) continue;
       if (
@@ -1428,7 +1589,7 @@ export class TankGame {
         this.shake = Math.max(this.shake, 0.8);
         return true;
       }
-      if (enemy.kind === "heavy") {
+      if (enemy.kind === "heavy" && projectile.kind !== "piercing") {
         const impactAngle = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
         if (Math.abs(normalizeAngle(impactAngle - enemy.hullAngle)) < 1.05) {
           this.spawnImpactParticles(
@@ -1443,7 +1604,7 @@ export class TankGame {
           return true;
         }
       }
-      const supportingTank = this.enemies.find((candidate) => (
+      const supportingTank = projectile.kind === "piercing" ? undefined : this.enemies.find((candidate) => (
         candidate.alive
           && candidate.kind === "support"
           && candidate.id !== enemy.id
@@ -1456,16 +1617,7 @@ export class TankGame {
         this.spawnImpactParticles(enemy.x, enemy.y, "#7bdcff", 10);
         this.spawnShieldArc(enemy.x, enemy.y, "#7bdcff");
         if (supportingTank.hp <= 0) {
-          supportingTank.alive = false;
-          this.recordWreck(supportingTank);
-          this.score += 160;
-          this.spawnExplosion(
-            supportingTank.x,
-            supportingTank.y,
-            24,
-            ENEMY_COLOR,
-            WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
-          );
+          this.destroyEnemy(supportingTank, 160);
         }
         return true;
       }
@@ -1482,25 +1634,59 @@ export class TankGame {
         Math.atan2(projectile.velocityY, projectile.velocityX) + Math.PI,
       );
       this.audio.impact();
+      if (projectile.explosionRadius > 0) this.applyExplosiveImpact(projectile, enemy.id);
+      if (projectile.stunRadius > 0) this.applyEmpImpact(projectile);
       if (enemy.hp <= 0) {
-        enemy.alive = false;
-        this.recordWreck(enemy);
-        this.score += enemy.kind === "boss"
-          ? 2500
-          : enemy.kind === "heavy" || enemy.kind === "artillery" ? 260 : 100;
-        this.shake = Math.max(this.shake, enemy.kind === "boss" ? 4 : 1.6);
-        this.hitStop = enemy.kind === "boss" ? 0.11 : 0.045;
-        this.spawnExplosion(
-          enemy.x,
-          enemy.y,
-          enemy.kind === "boss" ? 42 : 22,
-          ENEMY_COLOR,
-          WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
-        );
+        this.destroyEnemy(enemy);
+      }
+      if (projectile.kind === "piercing" && projectile.penetrations > 0) {
+        projectile.hitTankIds.push(enemy.id);
+        projectile.penetrations -= 1;
+        return false;
       }
       return true;
     }
     return false;
+  }
+
+  private destroyEnemy(enemy: EnemyTank, score = enemy.kind === "boss"
+    ? 2500
+    : enemy.kind === "heavy" || enemy.kind === "artillery" ? 260 : 100): void {
+    if (!enemy.alive) return;
+    enemy.alive = false;
+    this.recordWreck(enemy);
+    this.score += score;
+    this.shake = Math.max(this.shake, enemy.kind === "boss" ? 4 : 1.6);
+    this.hitStop = Math.max(this.hitStop, enemy.kind === "boss" ? 0.11 : 0.045);
+    this.spawnExplosion(
+      enemy.x,
+      enemy.y,
+      enemy.kind === "boss" ? 42 : 22,
+      ENEMY_COLOR,
+      WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
+    );
+  }
+
+  private applyExplosiveImpact(projectile: Projectile, directEnemyId: number): void {
+    this.spawnExplosion(projectile.x, projectile.y, projectile.explosionRadius * 0.42, projectile.color);
+    this.shake = Math.max(this.shake, 2.2);
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.id === directEnemyId) continue;
+      if (distanceSquared(enemy, projectile) >= projectile.explosionRadius ** 2) continue;
+      if (enemy.kind === "boss" && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)) continue;
+      enemy.hp -= 1;
+      enemy.damageFlash = 0.12;
+      enemy.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
+      if (enemy.hp <= 0) this.destroyEnemy(enemy, 140);
+    }
+  }
+
+  private applyEmpImpact(projectile: Projectile): void {
+    this.spawnShieldArc(projectile.x, projectile.y, projectile.color);
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || distanceSquared(enemy, projectile) >= projectile.stunRadius ** 2) continue;
+      enemy.stunned = Math.max(enemy.stunned, projectile.stunSeconds);
+    }
   }
 
   private projectileHitsObjective(projectile: Projectile): boolean {
@@ -1526,6 +1712,23 @@ export class TankGame {
       return true;
     }
     return false;
+  }
+
+  private projectileHitsMine(projectile: Projectile): boolean {
+    const mineIndex = this.mines.findIndex((mine) => {
+      if (mine.owner === projectile.owner) return false;
+      const radius = mine.radius + projectile.radius;
+      return segmentDistanceSquared(
+        projectile,
+        { x: projectile.previousX, y: projectile.previousY },
+        mine,
+      ) <= radius * radius;
+    });
+    if (mineIndex < 0) return false;
+    const [mine] = this.mines.splice(mineIndex, 1);
+    this.detonate(mine.x, mine.y, 82, projectile.owner);
+    this.score += projectile.owner === "player" ? 35 : 0;
+    return true;
   }
 
   private projectileHitsHazard(projectile: Projectile): boolean {
@@ -1766,18 +1969,7 @@ export class TankGame {
           && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
         ) continue;
         enemy.hp -= 2;
-        if (enemy.hp <= 0) {
-          enemy.alive = false;
-          this.recordWreck(enemy);
-          this.score += 120;
-          this.spawnExplosion(
-            enemy.x,
-            enemy.y,
-            22,
-            ENEMY_COLOR,
-            WRECK_SOLID_SECONDS + WRECK_FADE_SECONDS,
-          );
-        }
+        if (enemy.hp <= 0) this.destroyEnemy(enemy, 120);
       }
     }
   }
@@ -1941,11 +2133,26 @@ export class TankGame {
 
   private updateTankVisualStates(delta: number): void {
     for (const tank of [this.player, ...this.enemies]) {
+      tank.stunned = Math.max(0, tank.stunned - delta);
       tank.recoilTime = Math.max(0, tank.recoilTime - delta);
       tank.chassisKick = Math.max(0, tank.chassisKick - delta * 14);
       tank.damageFlash = Math.max(0, tank.damageFlash - delta);
       const healthRatio = tank.maxHp > 0 ? tank.hp / tank.maxHp : 0;
       tank.smokeIntensity = healthRatio < 0.25 ? 0.9 : healthRatio < 0.5 ? 0.36 : 0;
+      if (tank.alive && tank.stunned > 0 && Math.random() < delta * 9) {
+        this.addParticle({
+          kind: "spark",
+          x: tank.x + (Math.random() - 0.5) * tank.radius * 1.6,
+          y: tank.y + (Math.random() - 0.5) * tank.radius * 1.6,
+          velocityX: (Math.random() - 0.5) * 42,
+          velocityY: (Math.random() - 0.5) * 42,
+          life: 0.18,
+          maxLife: 0.18,
+          size: 2.2,
+          color: "#7bdcff",
+          angle: Math.random() * TAU,
+        });
+      }
       if (!tank.alive || tank.smokeIntensity <= 0) continue;
       tank.smokeCooldown -= delta;
       if (tank.smokeCooldown > 0) continue;
@@ -2142,7 +2349,7 @@ export class TankGame {
     const activeEnemies = this.enemies.filter((enemy) => enemy.alive).length;
     const enemiesLeft = this.getEnemiesLeft();
     const objective = this.getObjectiveProgress();
-    const dashCooldown = this.loadout.utility === "dash" ? 2.6 : 3.8;
+    const tankDefinition = PLAYER_TANKS[this.playerTank];
     this.onSnapshot({
       phase: this.phase,
       mode: this.mode,
@@ -2156,9 +2363,15 @@ export class TankGame {
       elapsed: this.elapsed,
       shots: this.shots,
       hits: this.hits,
-      dashReady: 1 - clamp(this.player.dashCooldown / dashCooldown, 0, 1),
+      abilityReady: 1 - clamp(this.player.dashCooldown / tankDefinition.abilityCooldown, 0, 1),
+      abilityLabel: tankDefinition.abilityLabel,
+      abilityCharges: this.utilityCharges,
+      selectedAmmo: this.selectedAmmo,
+      ammunition: getAmmoSnapshots(this.ammunition),
       bossHealth: boss ? boss.hp / boss.maxHp : null,
-      bossPhase: boss ? boss.hp > 8 ? 1 : boss.hp > 4 ? 2 : 3 : null,
+      bossPhase: boss
+        ? boss.hp > boss.maxHp * (2 / 3) ? 1 : boss.hp > boss.maxHp / 3 ? 2 : 3
+        : null,
       activePowerUps: getActivePowerUpSnapshots(this.activePowerUps),
       objectiveLabel: this.mode === "survival" ? "ENDLESS SURVIVAL" : this.mission.objective.label,
       objectiveProgress: clamp(objective.progress, 0, 1),
@@ -2167,7 +2380,6 @@ export class TankGame {
       bonusComplete: this.isBonusComplete(),
       score: this.score,
       wave: this.wave,
-      utilityCharges: this.utilityCharges,
       fps: this.fps,
     });
   }

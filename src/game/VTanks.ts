@@ -3,11 +3,10 @@ import { getMissionEnemyTotal, MISSIONS } from "./levels.ts";
 import { GameRenderer } from "./renderer.ts";
 import { POWER_UP_DEFINITIONS } from "./powerups.ts";
 import {
-  CANNONS,
-  CHASSIS,
-  UTILITIES,
-  type Loadout,
+  PLAYER_TANKS,
+  type PlayerTankKind,
 } from "./loadouts.ts";
+import { AMMO_DEFINITIONS, type AmmoKind } from "./ammunition.ts";
 import {
   bestRecord,
   readCampaignSave,
@@ -21,8 +20,8 @@ const INITIAL_SNAPSHOT: GameSnapshot = {
   phase: "menu",
   mode: "campaign",
   missionIndex: 0,
-  health: 3,
-  maxHealth: 3,
+  health: 4,
+  maxHealth: 4,
   enemiesLeft: getMissionEnemyTotal(MISSIONS[0]),
   activeEnemies: MISSIONS[0].enemies.length,
   totalEnemies: getMissionEnemyTotal(MISSIONS[0]),
@@ -30,7 +29,16 @@ const INITIAL_SNAPSHOT: GameSnapshot = {
   elapsed: 0,
   shots: 0,
   hits: 0,
-  dashReady: 1,
+  abilityReady: 1,
+  abilityLabel: PLAYER_TANKS.vanguard.abilityLabel,
+  abilityCharges: 0,
+  selectedAmmo: "basic",
+  ammunition: [
+    { kind: "basic", count: null },
+    { kind: "piercing", count: 0 },
+    { kind: "explosive", count: 0 },
+    { kind: "emp", count: 0 },
+  ],
   bossHealth: null,
   bossPhase: null,
   activePowerUps: [],
@@ -41,7 +49,6 @@ const INITIAL_SNAPSHOT: GameSnapshot = {
   bonusComplete: false,
   score: 0,
   wave: 1,
-  utilityCharges: 0,
   fps: 0,
 };
 
@@ -111,16 +118,14 @@ function missionCards(): string {
   `).join("");
 }
 
-function loadoutButtons<T extends string>(
-  group: keyof Loadout,
-  options: Record<T, { label: string; description: string }>,
-): string {
-  return Object.entries(options).map(([value, option]) => {
-    const typed = option as { label: string; description: string };
+function tankClassButtons(): string {
+  return Object.entries(PLAYER_TANKS).map(([value, option]) => {
     return `
-      <button class="loadout-option" data-loadout-group="${group}" data-loadout-value="${value}">
-        <strong>${typed.label}</strong>
-        <span>${typed.description}</span>
+      <button class="tank-class-option" data-tank-class="${value}">
+        <small>${option.role}</small>
+        <strong>${option.label}</strong>
+        <span>${option.description}</span>
+        <em>RMB / ${option.abilityLabel} — ${option.abilityDescription}</em>
       </button>
     `;
   }).join("");
@@ -152,12 +157,7 @@ export class VTanks {
     root.innerHTML = gameShell;
     requiredElement(root, ".mission-grid").innerHTML = missionCards();
     this.renderMissionCardMaps();
-    requiredElement(root, '[data-loadout-options="cannon"]').innerHTML =
-      loadoutButtons("cannon", CANNONS);
-    requiredElement(root, '[data-loadout-options="chassis"]').innerHTML =
-      loadoutButtons("chassis", CHASSIS);
-    requiredElement(root, '[data-loadout-options="utility"]').innerHTML =
-      loadoutButtons("utility", UTILITIES);
+    requiredElement(root, "[data-tank-classes]").innerHTML = tankClassButtons();
     requiredElement(root, "[data-campaign-total]").textContent =
       `/${MISSIONS.length.toString().padStart(2, "0")}`;
     this.shell = requiredElement(root, ".game-shell");
@@ -169,7 +169,7 @@ export class VTanks {
       this.onSnapshot,
       this.onPhase,
     );
-    this.game.configure(this.save.loadout);
+    this.game.configure(this.save.tankClass);
     this.game.setSound(this.soundEnabled);
     this.render();
   }
@@ -231,13 +231,12 @@ export class VTanks {
     }
 
     const actionButton = target.closest<HTMLButtonElement>("[data-action]");
-    const loadoutButton = target.closest<HTMLButtonElement>("[data-loadout-group]");
-    if (loadoutButton) {
-      const group = loadoutButton.dataset.loadoutGroup as keyof Loadout | undefined;
-      const value = loadoutButton.dataset.loadoutValue;
-      if (group && value) {
-        this.save.loadout = { ...this.save.loadout, [group]: value };
-        this.game.configure(this.save.loadout);
+    const tankClassButton = target.closest<HTMLButtonElement>("[data-tank-class]");
+    if (tankClassButton) {
+      const value = tankClassButton.dataset.tankClass as PlayerTankKind | undefined;
+      if (value && value in PLAYER_TANKS) {
+        this.save.tankClass = value;
+        this.game.configure(this.save.tankClass);
         writeCampaignSave(this.save);
         this.render();
       }
@@ -267,7 +266,7 @@ export class VTanks {
   private startMission(index: number): void {
     this.recordedResultPhase = null;
     this.selectedMission = index;
-    this.game.configure(this.save.loadout);
+    this.game.configure(this.save.tankClass);
     this.game.startMission(index);
   }
 
@@ -275,7 +274,7 @@ export class VTanks {
     this.recordedResultPhase = null;
     const now = new Date();
     const seed = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-    this.game.configure(this.save.loadout);
+    this.game.configure(this.save.tankClass);
     this.game.startSurvival(seed);
   }
 
@@ -402,8 +401,13 @@ export class VTanks {
       pip.classList.toggle("active", index < this.snapshot.health);
       return pip;
     }));
-    requiredElement<HTMLElement>(this.root, "[data-dash-charge]").style.width =
-      `${this.snapshot.dashReady * 100}%`;
+    requiredElement<HTMLElement>(this.root, "[data-ability-charge]").style.width =
+      `${this.snapshot.abilityReady * 100}%`;
+    requiredElement(this.root, "[data-ability-label]").textContent = this.snapshot.abilityLabel;
+    requiredElement(this.root, "[data-ability-status]").textContent =
+      this.save.tankClass === "sapper"
+        ? `${this.snapshot.abilityCharges} MINES`
+        : this.snapshot.abilityReady >= 1 ? "READY" : "CHARGING";
     const boss = requiredElement<HTMLElement>(this.root, "[data-boss]");
     boss.hidden = !playing || this.snapshot.bossHealth === null;
     requiredElement<HTMLElement>(this.root, "[data-boss-health]").style.width =
@@ -412,10 +416,23 @@ export class VTanks {
       this.snapshot.bossPhase ? ` / PHASE ${this.snapshot.bossPhase}` : "";
     requiredElement(this.root, "[data-bonus-status]").textContent =
       `${this.snapshot.bonusComplete ? "✓" : "○"} ${this.snapshot.bonusLabel}`;
-    requiredElement(this.root, "[data-utility-status]").textContent =
-      this.save.loadout.utility === "mine"
-        ? `E / MINES ${this.snapshot.utilityCharges}`
-        : this.save.loadout.utility.toUpperCase();
+    const ammunition = requiredElement<HTMLElement>(this.root, "[data-ammunition]");
+    ammunition.replaceChildren(...this.snapshot.ammunition.map((ammo, index) => {
+      const definition = AMMO_DEFINITIONS[ammo.kind as AmmoKind];
+      const chip = document.createElement("div");
+      chip.className = "ammo-chip";
+      chip.classList.toggle("selected", ammo.kind === this.snapshot.selectedAmmo);
+      chip.classList.toggle("empty", ammo.count === 0);
+      chip.style.setProperty("--ammo-color", definition.color);
+      const key = document.createElement("b");
+      key.textContent = String(index + 1);
+      const label = document.createElement("span");
+      label.textContent = definition.shortLabel;
+      const count = document.createElement("strong");
+      count.textContent = ammo.count === null ? "∞" : String(ammo.count);
+      chip.append(key, label, count);
+      return chip;
+    }));
 
     const powerUpReadout = requiredElement<HTMLElement>(this.root, "[data-powerup-readout]");
     powerUpReadout.hidden = !playing || this.snapshot.activePowerUps.length === 0;
@@ -464,9 +481,8 @@ export class VTanks {
     requiredElement(this.root, "[data-selected-bonus]").textContent = selected.bonus.label;
     this.renderSelectedMissionMap(this.selectedMission);
 
-    this.root.querySelectorAll<HTMLButtonElement>("[data-loadout-group]").forEach((button) => {
-      const group = button.dataset.loadoutGroup as keyof Loadout;
-      button.classList.toggle("selected", this.save.loadout[group] === button.dataset.loadoutValue);
+    this.root.querySelectorAll<HTMLButtonElement>("[data-tank-class]").forEach((button) => {
+      button.classList.toggle("selected", this.save.tankClass === button.dataset.tankClass);
     });
     requiredElement(this.root, "[data-survival-best]").textContent =
       this.save.survivalBest.toLocaleString();

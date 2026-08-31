@@ -4,6 +4,8 @@ import { MISSIONS } from "../src/game/levels.ts";
 import {
   CANNON_KINDS,
   CHASSIS_KINDS,
+  PLAYER_TANK_KINDS,
+  PLAYER_TANKS,
   UTILITY_KINDS,
   getCannonStats,
   getChassisStats,
@@ -39,7 +41,14 @@ test("uplink hold objectives take 20 seconds", () => {
 test("loadout options are balanced sidegrades with validated fallbacks", () => {
   assert.equal(CANNON_KINDS.length, 3);
   assert.equal(CHASSIS_KINDS.length, 3);
-  assert.equal(UTILITY_KINDS.length, 3);
+  assert.equal(UTILITY_KINDS.length, 4);
+  assert.equal(PLAYER_TANK_KINDS.length, 4);
+  assert.deepEqual(
+    new Set(PLAYER_TANK_KINDS.map((kind) => PLAYER_TANKS[kind].loadout.utility)),
+    new Set(["dash", "shield", "shock", "mine"]),
+  );
+  assert.ok(PLAYER_TANKS.raptor.speed > PLAYER_TANKS.bulwark.speed);
+  assert.ok(PLAYER_TANKS.bulwark.hp > PLAYER_TANKS.raptor.hp);
   assert.ok(getCannonStats("rapid").reload < getCannonStats("heavy").reload);
   assert.ok(getCannonStats("heavy").damage > getCannonStats("rapid").damage);
   assert.ok(getChassisStats("fast").speed > getChassisStats("armored").speed);

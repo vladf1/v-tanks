@@ -36,8 +36,8 @@ export function getMissionVisualTheme(missionNumber: string | number): VisualThe
   const parsed = typeof missionNumber === "number"
     ? missionNumber
     : Number.parseInt(missionNumber, 10);
-  if ([3, 5, 8].includes(parsed)) return "industrial";
-  if ([6, 9, 10].includes(parsed)) return "command-complex";
+  if ([3, 5, 8, 11, 13].includes(parsed)) return "industrial";
+  if ([6, 9, 10, 12, 14].includes(parsed)) return "command-complex";
   return "proving-ground";
 }
 
@@ -86,16 +86,16 @@ export interface Mission {
 
 export const VIEW_WIDTH = 960;
 export const VIEW_HEIGHT = 600;
-export const WORLD_WIDTH = 1920;
-export const WORLD_HEIGHT = 1200;
+export const WORLD_WIDTH = 2400;
+export const WORLD_HEIGHT = 1500;
 export const STANDARD_TANK_RADIUS = 15;
 export const BOSS_TANK_RADIUS = 25;
 export const TANK_WALL_PADDING = 2;
 
-const ARENA_SCALE = 2;
-const PAR_TIME_SCALE = 1.65;
+const ARENA_SCALE = 2.5;
+const PAR_TIME_SCALE = 2;
 const REINFORCEMENT_PAR_SECONDS = 4.5;
-const REINFORCEMENT_COUNTS = [7, 8, 10, 12, 14, 16, 18, 20, 22, 24];
+const REINFORCEMENT_COUNTS = [7, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32];
 const WALL_KINDS: WallKind[] = ["rock", "dragons-teeth", "hedgehog"];
 
 function clamp(value: number, min: number, max: number): number {
@@ -126,6 +126,10 @@ const OBJECTIVE_KINDS: ObjectiveKind[] = [
   "hold",
   "survive",
   "relays",
+  "eliminate",
+  "relays",
+  "hold",
+  "survive",
   "omega",
 ];
 const BONUS_KINDS: BonusKind[] = [
@@ -137,6 +141,10 @@ const BONUS_KINDS: BonusKind[] = [
   "hull",
   "ricochet",
   "time",
+  "accuracy",
+  "hull",
+  "time",
+  "ricochet",
   "accuracy",
   "hull",
 ];
@@ -285,9 +293,13 @@ function expandMission(mission: MissionTemplate, missionIndex: number): Mission 
     })),
     reinforcements: {
       count: reinforcementCount,
-      intervalMin: 6 - (missionIndex * 0.22),
-      intervalMax: 8.5 - (missionIndex * 0.32),
-      maxConcurrent: mission.enemies.length + 1 + Math.floor(missionIndex / 5),
+      intervalMin: 6
+        - (Math.min(missionIndex, 9) * 0.22)
+        - (Math.max(0, missionIndex - 9) * 0.08),
+      intervalMax: 8.5
+        - (Math.min(missionIndex, 9) * 0.32)
+        - (Math.max(0, missionIndex - 9) * 0.06),
+      maxConcurrent: mission.enemies.length + 1 + Math.min(1, Math.floor(missionIndex / 5)),
     },
     walls: mission.walls.map((wall, index) => ({
       x: wall.x * ARENA_SCALE,
@@ -622,10 +634,164 @@ const MISSION_TEMPLATES: MissionTemplate[] = [
   },
   {
     number: "10",
+    name: "Shatterline",
+    briefing: "Cut through the fractured command line and turn its volatile defenses inward.",
+    threat: "EXTREME",
+    parTime: 158,
+    player: { x: 110, y: 520 },
+    enemies: [
+      { kind: "guard", x: 290, y: 120 },
+      { kind: "guard", x: 290, y: 300 },
+      { kind: "guard", x: 290, y: 480 },
+      { kind: "scout", x: 430, y: 90 },
+      { kind: "scout", x: 430, y: 220 },
+      { kind: "scout", x: 430, y: 390 },
+      { kind: "scout", x: 430, y: 520 },
+      { kind: "sniper", x: 590, y: 85 },
+      { kind: "guard", x: 590, y: 260 },
+      { kind: "guard", x: 590, y: 440 },
+      { kind: "sniper", x: 720, y: 520 },
+      { kind: "guard", x: 760, y: 170 },
+      { kind: "guard", x: 760, y: 350 },
+      { kind: "sniper", x: 880, y: 80 },
+      { kind: "scout", x: 875, y: 300 },
+      { kind: "sniper", x: 880, y: 510 },
+    ],
+    walls: [
+      { x: 190, y: 180, width: 110, height: 24 },
+      { x: 190, y: 390, width: 110, height: 24 },
+      { x: 350, y: 55, width: 24, height: 170 },
+      { x: 350, y: 360, width: 24, height: 185 },
+      { x: 500, y: 205, width: 120, height: 24 },
+      { x: 500, y: 372, width: 120, height: 24 },
+      { x: 680, y: 55, width: 24, height: 180 },
+      { x: 680, y: 365, width: 24, height: 180 },
+      { x: 820, y: 230, width: 24, height: 140 },
+    ],
+  },
+  {
+    number: "11",
+    name: "Signal Storm",
+    briefing: "Disable the relay web while specialist armor closes from every direction.",
+    threat: "EXTREME",
+    parTime: 172,
+    player: { x: 480, y: 545 },
+    enemies: [
+      { kind: "sniper", x: 90, y: 85 },
+      { kind: "sniper", x: 870, y: 85 },
+      { kind: "guard", x: 210, y: 145 },
+      { kind: "guard", x: 750, y: 145 },
+      { kind: "scout", x: 340, y: 90 },
+      { kind: "scout", x: 620, y: 90 },
+      { kind: "guard", x: 170, y: 310 },
+      { kind: "guard", x: 790, y: 310 },
+      { kind: "scout", x: 310, y: 300 },
+      { kind: "scout", x: 650, y: 300 },
+      { kind: "guard", x: 220, y: 475 },
+      { kind: "guard", x: 740, y: 475 },
+      { kind: "sniper", x: 90, y: 520 },
+      { kind: "sniper", x: 870, y: 520 },
+      { kind: "scout", x: 400, y: 430 },
+      { kind: "scout", x: 545, y: 430 },
+      { kind: "guard", x: 480, y: 180 },
+    ],
+    walls: [
+      { x: 130, y: 210, width: 180, height: 24 },
+      { x: 650, y: 210, width: 180, height: 24 },
+      { x: 130, y: 380, width: 180, height: 24 },
+      { x: 650, y: 380, width: 180, height: 24 },
+      { x: 350, y: 70, width: 24, height: 155 },
+      { x: 586, y: 70, width: 24, height: 155 },
+      { x: 350, y: 375, width: 24, height: 155 },
+      { x: 586, y: 375, width: 24, height: 155 },
+      { x: 435, y: 265, width: 90, height: 70 },
+    ],
+  },
+  {
+    number: "12",
+    name: "Thunder Basin",
+    briefing: "Seize the central uplink and use EMP ammunition to break the encirclement.",
+    threat: "EXTREME",
+    parTime: 188,
+    player: { x: 100, y: 300 },
+    enemies: [
+      { kind: "guard", x: 270, y: 90 },
+      { kind: "guard", x: 270, y: 510 },
+      { kind: "scout", x: 360, y: 210 },
+      { kind: "scout", x: 360, y: 390 },
+      { kind: "sniper", x: 490, y: 80 },
+      { kind: "guard", x: 490, y: 220 },
+      { kind: "guard", x: 490, y: 380 },
+      { kind: "sniper", x: 490, y: 520 },
+      { kind: "scout", x: 620, y: 120 },
+      { kind: "scout", x: 620, y: 300 },
+      { kind: "scout", x: 620, y: 480 },
+      { kind: "guard", x: 740, y: 90 },
+      { kind: "guard", x: 740, y: 275 },
+      { kind: "guard", x: 740, y: 420 },
+      { kind: "sniper", x: 875, y: 80 },
+      { kind: "scout", x: 865, y: 220 },
+      { kind: "scout", x: 865, y: 380 },
+      { kind: "sniper", x: 875, y: 520 },
+    ],
+    walls: [
+      { x: 180, y: 170, width: 24, height: 260 },
+      { x: 305, y: 70, width: 24, height: 150 },
+      { x: 305, y: 380, width: 24, height: 150 },
+      { x: 430, y: 245, width: 100, height: 24 },
+      { x: 430, y: 331, width: 100, height: 24 },
+      { x: 575, y: 70, width: 24, height: 170 },
+      { x: 575, y: 360, width: 24, height: 170 },
+      { x: 700, y: 220, width: 120, height: 24 },
+      { x: 700, y: 356, width: 120, height: 24 },
+    ],
+  },
+  {
+    number: "13",
+    name: "Last Light",
+    briefing: "Survive the final defense lattice. Every ammunition pack is a tactical lifeline.",
+    threat: "EXTREME",
+    parTime: 205,
+    player: { x: 480, y: 535 },
+    enemies: [
+      { kind: "sniper", x: 80, y: 80 },
+      { kind: "sniper", x: 880, y: 80 },
+      { kind: "guard", x: 190, y: 135 },
+      { kind: "guard", x: 770, y: 135 },
+      { kind: "scout", x: 320, y: 85 },
+      { kind: "scout", x: 640, y: 85 },
+      { kind: "guard", x: 110, y: 300 },
+      { kind: "guard", x: 850, y: 300 },
+      { kind: "scout", x: 270, y: 285 },
+      { kind: "scout", x: 690, y: 285 },
+      { kind: "guard", x: 400, y: 210 },
+      { kind: "guard", x: 560, y: 210 },
+      { kind: "scout", x: 180, y: 470 },
+      { kind: "scout", x: 780, y: 470 },
+      { kind: "sniper", x: 70, y: 525 },
+      { kind: "sniper", x: 890, y: 525 },
+      { kind: "guard", x: 390, y: 405 },
+      { kind: "guard", x: 570, y: 405 },
+      { kind: "scout", x: 480, y: 95 },
+    ],
+    walls: [
+      { x: 145, y: 190, width: 150, height: 24 },
+      { x: 665, y: 190, width: 150, height: 24 },
+      { x: 145, y: 390, width: 150, height: 24 },
+      { x: 665, y: 390, width: 150, height: 24 },
+      { x: 335, y: 65, width: 24, height: 170 },
+      { x: 601, y: 65, width: 24, height: 170 },
+      { x: 335, y: 365, width: 24, height: 165 },
+      { x: 601, y: 365, width: 24, height: 165 },
+      { x: 435, y: 255, width: 90, height: 90 },
+    ],
+  },
+  {
+    number: "14",
     name: "Omega Core",
     briefing: "Cross the final defense lattice, dismantle the escort, and destroy the Omega Core.",
     threat: "BOSS",
-    parTime: 165,
+    parTime: 225,
     player: { x: 90, y: 300 },
     enemies: [
       { kind: "boss", x: 850, y: 300 },

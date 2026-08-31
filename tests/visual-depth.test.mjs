@@ -42,6 +42,10 @@ test("missions map to the requested visual themes", () => {
       "industrial",
       "command-complex",
       "command-complex",
+      "industrial",
+      "command-complex",
+      "industrial",
+      "command-complex",
     ],
   );
   for (const mission of MISSIONS) {
@@ -264,7 +268,7 @@ test("mission directions appear at the bottom temporarily and honor reduced moti
   assert.match(stylesheet, /@media \(prefers-reduced-motion: reduce\)[\s\S]*mission-tip-reduced/);
 });
 
-test("player projectiles use the player tank color", async () => {
+test("player projectiles use the selected ammunition color", async () => {
   const engineSource = await readFile(
     new URL("../src/game/engine.ts", import.meta.url),
     "utf8",
@@ -272,7 +276,7 @@ test("player projectiles use the player tank color", async () => {
   const start = engineSource.indexOf("private spawnProjectile");
   const end = engineSource.indexOf("private tryDash", start);
   const spawnProjectile = engineSource.slice(start, end);
-  assert.match(spawnProjectile, /color:\s*owner === "player"\s*\? PLAYER_COLOR/);
+  assert.match(spawnProjectile, /color:\s*owner === "player"\s*\? ammo\.color/);
 });
 
 test("eliminate missions do not repeat enemy progress in the objective readout", async () => {

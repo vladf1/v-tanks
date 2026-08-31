@@ -11,14 +11,14 @@ import {
   WORLD_WIDTH,
 } from "../src/game/levels.ts";
 
-const EXPECTED_ENEMY_COUNTS = [5, 7, 8, 10, 10, 11, 12, 14, 16, 18];
-const EXPECTED_TOTAL_ENEMY_COUNTS = [12, 15, 18, 22, 24, 27, 30, 34, 38, 42];
+const EXPECTED_ENEMY_COUNTS = [5, 7, 8, 10, 10, 11, 12, 14, 16, 16, 17, 18, 19, 18];
+const EXPECTED_TOTAL_ENEMY_COUNTS = [12, 15, 18, 22, 24, 27, 30, 34, 38, 40, 43, 46, 49, 50];
 
-test("campaign contains ten increasingly demanding missions", () => {
-  assert.equal(MISSIONS.length, 10);
+test("campaign contains fourteen increasingly demanding missions", () => {
+  assert.equal(MISSIONS.length, 14);
   assert.deepEqual(
     MISSIONS.map(({ number }) => number),
-    Array.from({ length: 10 }, (_, index) => String(index + 1).padStart(2, "0")),
+    Array.from({ length: 14 }, (_, index) => String(index + 1).padStart(2, "0")),
   );
   assert.deepEqual(
     MISSIONS.map(({ enemies }) => enemies.length),
@@ -47,13 +47,13 @@ test("reinforcement pressure rises moderately with mission number", () => {
   )));
 });
 
-test("the campaign has exactly one boss and it starts in mission 10", () => {
+test("the campaign has exactly one boss and it starts in mission 14", () => {
   const bossSpawns = MISSIONS.flatMap((mission) => (
     mission.enemies
       .filter(({ kind }) => kind === "boss")
       .map(() => mission.number)
   ));
-  assert.deepEqual(bossSpawns, ["10"]);
+  assert.deepEqual(bossSpawns, ["14"]);
 });
 
 test("every mission starts tanks clear of walls", () => {
@@ -68,8 +68,8 @@ test("every mission starts tanks clear of walls", () => {
 });
 
 test("missions occupy a world larger than the viewport and stay in bounds", () => {
-  assert.equal(WORLD_WIDTH, VIEW_WIDTH * 2);
-  assert.equal(WORLD_HEIGHT, VIEW_HEIGHT * 2);
+  assert.equal(WORLD_WIDTH, VIEW_WIDTH * 2.5);
+  assert.equal(WORLD_HEIGHT, VIEW_HEIGHT * 2.5);
 
   for (const mission of MISSIONS) {
     const points = [mission.player, ...mission.enemies];
@@ -137,7 +137,7 @@ test("camera follows the player and clamps at world edges", () => {
 test("mission 05 starts from a safer western staging area", () => {
   const mission = MISSIONS.find(({ number }) => number === "05");
   assert.ok(mission);
-  assert.ok(mission.player.x <= VIEW_WIDTH * 0.25);
+  assert.ok(mission.player.x <= WORLD_WIDTH * 0.15);
   assert.equal(mission.enemies.length, 10);
   assert.ok(mission.enemies.every(({ x }) => x > mission.player.x));
 
