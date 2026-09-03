@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>V/Tanks performance benchmark</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #020504;
+        color: #effff7;
+      }
+
+      body {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 40px 24px 64px;
+      }
+
+      h1, h2, p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 8px;
+      }
+
+      h2 {
+        margin: 32px 0 6px;
+        font-size: 18px;
+      }
+
+      .intro, .caption, .metric small {
+        color: #a8bdb3;
+      }
+
+      .results {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+        margin: 28px 0 16px;
+      }
+
+      .metric {
+        padding: 18px;
+        border: 1px solid rgba(157, 255, 215, 0.22);
+        border-radius: 10px;
+        background: linear-gradient(145deg, rgba(7, 22, 16, 0.96), rgba(3, 9, 7, 0.82));
+      }
+
+      .metric span, .metric strong, .metric small {
+        display: block;
+      }
+
+      .metric span {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9dffd7;
+      }
+
+      .metric strong {
+        min-height: 38px;
+        margin: 8px 0 4px;
+        font: 700 28px/1.2 "SFMono-Regular", "Cascadia Mono", monospace;
+      }
+
+      .metric small {
+        line-height: 1.45;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        margin-top: 14px;
+        border: 1px solid rgba(157, 255, 215, 0.16);
+        border-radius: 8px;
+      }
+
+      canvas[hidden] {
+        display: none;
+      }
+
+      details {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border: 1px solid rgba(157, 255, 215, 0.16);
+        border-radius: 8px;
+        background: rgba(3, 9, 7, 0.62);
+      }
+
+      summary {
+        cursor: pointer;
+        color: #c9ded4;
+      }
+
+      table {
+        width: 100%;
+        margin-top: 14px;
+        border-collapse: collapse;
+        font: 13px/1.5 "SFMono-Regular", "Cascadia Mono", monospace;
+      }
+
+      th, td {
+        padding: 8px;
+        border-top: 1px solid rgba(157, 255, 215, 0.12);
+        text-align: right;
+      }
+
+      th:first-child, td:first-child {
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>V/Tanks performance benchmark</h1>
+    <p class="intro">Crowded-scene renderer and 120 Hz simulation workload. Lower times are better; results are medians of five samples.</p>
+    <section id="result" class="results" aria-live="polite" aria-label="Benchmark results">
+      <article class="metric">
+        <span>Render time</span>
+        <strong id="render-result">Running…</strong>
+        <small id="render-context">30 crowded frames per sample</small>
+      </article>
+      <article class="metric">
+        <span>Simulation time</span>
+        <strong id="simulation-result">Running…</strong>
+        <small>6,000 engine steps per sample at a simulated 120 Hz</small>
+      </article>
+      <article class="metric">
+        <span>Test workload</span>
+        <strong id="mission-result">Loading…</strong>
+        <small>Automatically selects the mission with the most enemies, walls, and hazards</small>
+      </article>
+    </section>
+    <details>
+      <summary>Show all five timing samples</summary>
+      <table>
+        <thead><tr><th>Sample</th><th>Render (ms/frame)</th><th>Simulation (ms/step)</th></tr></thead>
+        <tbody id="sample-results"></tbody>
+      </table>
+    </details>
+    <h2>Crowded render workload</h2>
+    <p class="caption">This live preview shows the scene used for the renderer measurement. The simulation benchmark runs without drawing.</p>
+    <canvas id="render"></canvas>
+    <canvas id="simulation" hidden aria-hidden="true"></canvas>
+    <script type="module">
+      import { createActivePowerUps } from "/src/game/powerups.ts";
+      import { createMinefieldMines, TankGame } from "/src/game/engine.ts";
+      import { MISSIONS } from "/src/game/levels.ts";
+      import { GameRenderer } from "/src/game/renderer.ts";
+      import { generateEnvironmentalDetails, VISUAL_THEMES } from "/src/game/visual-state.ts";
+
+      const mission = MISSIONS.reduce((best, candidate) => (
+        candidate.enemies.length + candidate.walls.length + candidate.hazards.length
+          > best.enemies.length + best.walls.length + best.hazards.length ? candidate : best
+      ));
+      const tank = (id, kind, x, y) => ({
+        id, kind, x, y, radius: kind === "boss" ? 25 : 15,
+        hullAngle: id * 0.31, turretAngle: id * 0.47,
+        hp: kind === "boss" ? 15 : 3, maxHp: kind === "boss" ? 15 : 3,
+        cooldown: 0, dashCooldown: 0, invulnerable: 0, alive: true,
+        patrolAngle: 0, strafeDirection: 1, trackCooldown: 0,
+        recoil: id % 4, recoilTime: 0.04, recoilDuration: 0.1,
+        chassisKick: 0, damageFlash: 0, lastHitDirection: 0,
+        smokeIntensity: id % 7 === 0 ? 0.6 : 0, smokeCooldown: 0,
+        ultraAggressive: false, stunned: 0,
+      });
+      const renderCanvas = document.querySelector("#render");
+      const renderer = new GameRenderer(renderCanvas);
+      const player = { ...tank(-1, "player", 1024, 576), playerClass: "vanguard" };
+      const enemyKinds = ["scout", "guard", "sniper", "heavy", "minelayer", "support", "artillery", "boss"];
+      const enemies = Array.from({ length: 32 }, (_, index) => tank(
+        index,
+        enemyKinds[index % enemyKinds.length],
+        80 + (index * 137) % 1880,
+        70 + (index * 193) % 1010,
+      ));
+      const projectiles = Array.from({ length: 140 }, (_, index) => ({
+        x: 30 + (index * 89) % 1980, y: 30 + (index * 127) % 1090,
+        previousX: 0, previousY: 0,
+        velocityX: 160 + index % 30, velocityY: index % 2 ? 50 : -50,
+        owner: index % 2 ? "player" : "enemy", life: 2, bounces: 0,
+        damage: index % 9 === 0 ? 2 : 1, radius: 4, color: "#ffe27a",
+        ricocheted: false, kind: index % 7 === 0 ? "explosive" : "basic",
+        penetrations: 0, hitTankIds: [], ignoresProjectiles: false,
+        explosionRadius: 0, stunRadius: 0, stunSeconds: 0,
+      }));
+      const particles = Array.from({ length: 520 }, (_, index) => ({
+        kind: index % 9 === 0 ? "flash" : index % 3 === 0 ? "smoke" : "spark",
+        x: 20 + (index * 67) % 2000, y: 20 + (index * 83) % 1110,
+        velocityX: index % 12, velocityY: -(index % 16), life: 0.8, maxLife: 1,
+        size: 2 + index % 8, color: index % 11 === 0 ? "#7bdcff" : "#ffb29d",
+        angle: index * 0.17,
+      }));
+      const decals = [
+        ...generateEnvironmentalDetails(mission),
+        ...Array.from({ length: 150 }, (_, index) => ({
+          id: index + 1, kind: index % 5 === 0 ? "oil" : index % 2 ? "scorch" : "rubble",
+          x: 30 + (index * 101) % 1980, y: 30 + (index * 151) % 1090,
+          angle: index * 0.31, size: 8 + index % 16, opacity: 0.4, color: "#24241a", life: 12,
+        })),
+      ];
+      const trackMarks = Array.from({ length: 300 }, (_, index) => ({
+        x: 20 + (index * 73) % 2000, y: 20 + (index * 109) % 1110,
+        angle: index * 0.13, life: 4, maxLife: 5, color: "#27372f", width: 3,
+        faction: index % 2 ? "player" : "enemy",
+      }));
+      const wrecks = Array.from({ length: 30 }, (_, index) => ({
+        id: index, kind: enemyKinds[index % enemyKinds.length],
+        x: 50 + (index * 139) % 1940, y: 50 + (index * 181) % 1050,
+        hullAngle: index * 0.21, turretAngle: index * 0.37,
+        scale: 1, faction: "enemy", burn: 0, life: 20,
+      }));
+      const state = {
+        phase: "playing", mission, player, enemies, projectiles, particles,
+        powerUps: [], ammoPacks: [], activePowerUps: createActivePowerUps(),
+        objectiveNodes: [], uplinkSecondsRemaining: null,
+        hazards: mission.hazards.filter(({ kind }) => kind !== "minefield").map((hazard) => ({ ...hazard, active: true, cooldown: 0 })),
+        mines: createMinefieldMines(mission.hazards), artilleryStrikes: [],
+        trackMarks, decals, wrecks, ejectedTurrets: [],
+        theme: VISUAL_THEMES[mission.visualTheme], shake: 0,
+        mouse: { x: player.x + 120, y: player.y }, attractTime: 10,
+      };
+
+      const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+      const timeFrames = (callback, iterations, samples = 5) => {
+        for (let index = 0; index < 3; index += 1) callback(index);
+        const times = [];
+        for (let sample = 0; sample < samples; sample += 1) {
+          const start = performance.now();
+          for (let index = 0; index < iterations; index += 1) callback(index);
+          times.push((performance.now() - start) / iterations);
+        }
+        return { medianMs: median(times), samplesMs: times };
+      };
+
+      const render = timeFrames((index) => {
+        state.attractTime += 1 / 60;
+        player.x = 1024 + Math.cos(index / 15) * 460;
+        player.y = 576 + Math.sin(index / 18) * 240;
+        renderer.render(state);
+      }, 30);
+
+      const simulationTimes = [];
+      for (let sample = 0; sample < 5; sample += 1) {
+        const game = new TankGame(document.querySelector("#simulation"), () => {}, () => {});
+        game.setSound(false);
+        game.startMission(MISSIONS.indexOf(mission));
+        game.player.hp = 1_000_000;
+        game.player.maxHp = 1_000_000;
+        const start = performance.now();
+        for (let index = 0; index < 6000; index += 1) game.update(1 / 120);
+        simulationTimes.push((performance.now() - start) / 6000);
+        game.destroy();
+      }
+      renderer.destroy();
+      const simulationMedian = median(simulationTimes);
+      document.querySelector("#render-result").textContent = `${render.medianMs.toFixed(3)} ms / frame`;
+      document.querySelector("#render-context").textContent = `About ${Math.round(1000 / render.medianMs).toLocaleString()} synthetic CPU frames/sec`;
+      document.querySelector("#simulation-result").textContent = `${simulationMedian.toFixed(5)} ms / step`;
+      document.querySelector("#mission-result").textContent = `Mission ${mission.number}`;
+      document.querySelector("#sample-results").innerHTML = render.samplesMs.map((renderTime, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${renderTime.toFixed(3)}</td>
+          <td>${simulationTimes[index].toFixed(5)}</td>
+        </tr>
+      `).join("");
+      document.documentElement.dataset.benchmarkReady = "true";
+    </script>
+  </body>
+</html>

@@ -264,12 +264,20 @@ function createHazards(
   const count = Math.min(7, 2 + Math.floor(missionIndex / 2));
   const positions = findFeaturePositions(mission, count, missionIndex + 83);
   const kinds: HazardKind[] = ["barrel", "mud", "minefield", "repair-station", "barricade"];
-  return positions.map((position, index) => ({
-    ...position,
-    id: missionIndex * 10 + index,
-    kind: kinds[(missionIndex + index) % kinds.length],
-    radius: kinds[(missionIndex + index) % kinds.length] === "mud" ? 58 : 20,
-  }));
+  const barricadeRadii = [30, 38, 46];
+  return positions.map((position, index) => {
+    const kind = kinds[(missionIndex + index) % kinds.length];
+    return {
+      ...position,
+      id: missionIndex * 10 + index,
+      kind,
+      radius: kind === "mud"
+        ? 58
+        : kind === "barricade"
+          ? barricadeRadii[(missionIndex + index) % barricadeRadii.length]
+          : 20,
+    };
+  });
 }
 
 function expandMission(mission: MissionTemplate, missionIndex: number): Mission {

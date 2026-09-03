@@ -175,7 +175,7 @@ test("renderer preserves the visual depth order", async () => {
   const order = [
     "state.decals",
     "state.trackMarks",
-    "state.mission.walls",
+    "drawWallLayer",
     "state.hazards",
     "state.wrecks",
     "state.ejectedTurrets",
@@ -202,6 +202,77 @@ test("wall runs keep the terrain grid visible between individual obstacles", asy
   assert.doesNotMatch(drawWall, /fillRect\(wall\.x[^;]+wall\.height\)/);
 });
 
+test("cached wall art renders at the effective display resolution", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf("private drawWallLayer");
+  const end = rendererSource.indexOf("private drawDecal", start);
+  const drawWallLayer = rendererSource.slice(start, end);
+  assert.match(drawWallLayer, /this\.dpr \* this\.displayScale/);
+  assert.match(drawWallLayer, /setTransform\(renderScale/);
+  assert.match(drawWallLayer, /drawImage\(item\.canvas, item\.x, item\.y, item\.width, item\.height\)/);
+});
+
+test("mines use angular bodies and leave no oval mine craters", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const mineStart = rendererSource.indexOf("private drawMine(");
+  const mineEnd = rendererSource.indexOf("private drawArtilleryStrike", mineStart);
+  const drawMine = rendererSource.slice(mineStart, mineEnd);
+  assert.match(drawMine, /index < 8/);
+  assert.match(drawMine, /context\.lineTo\(0, 3\.2\)/);
+
+  const craterStart = rendererSource.indexOf('decal.kind === "mine-crater"');
+  const craterEnd = rendererSource.indexOf('decal.kind === "wall-chip"', craterStart);
+  const mineCrater = rendererSource.slice(craterStart, craterEnd);
+  assert.match(mineCrater, /index < 11/);
+  assert.doesNotMatch(mineCrater, /ellipse\(/);
+});
+
+test("mud hazards use irregular terrain shapes instead of an oval", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf('if (hazard.kind === "mud") {');
+  const end = rendererSource.indexOf('hazard.kind === "barrel"', start);
+  const mud = rendererSource.slice(start, end);
+  assert.match(mud, /traceOilBlob/);
+  assert.match(mud, /bezierCurveTo/);
+  assert.doesNotMatch(mud, /ellipse\(/);
+});
+
+test("explosive barrels use a round drum top with a hazard plate", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf('hazard.kind === "barrel"');
+  const end = rendererSource.indexOf('hazard.kind === "minefield"', start);
+  const barrel = rendererSource.slice(start, end);
+  assert.match(barrel, /createRadialGradient/);
+  assert.match(barrel, /context\.arc\(0, 0, 16/);
+  assert.match(barrel, /context\.moveTo\(0, -8\)/);
+  assert.doesNotMatch(barrel, /fillRect\(/);
+});
+
+test("barricade geometry scales with its collision radius", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf('hazard.kind === "barricade"');
+  const end = rendererSource.indexOf("private drawObjectiveNode", start);
+  const barricade = rendererSource.slice(start, end);
+  assert.match(barricade, /const halfWidth = hazard\.radius \* 1\.16/);
+  assert.match(barricade, /const halfHeight = hazard\.radius \* 0\.5/);
+  assert.match(barricade, /const calloutY = -hazard\.radius \* 1\.28/);
+});
+
 test("hedgehogs use contact shadows instead of black backing shapes", async () => {
   const rendererSource = await readFile(
     new URL("../src/game/renderer.ts", import.meta.url),
@@ -214,7 +285,7 @@ test("hedgehogs use contact shadows instead of black backing shapes", async () =
   assert.doesNotMatch(drawHedgehogs, /rgba\(0, 0, 0, 0\.72\)/);
 });
 
-test("uplink circles show the hold instruction and live countdown", async () => {
+test("uplink circles show the hold instruction and live countdown above the zone", async () => {
   const rendererSource = await readFile(
     new URL("../src/game/renderer.ts", import.meta.url),
     "utf8",
@@ -222,8 +293,13 @@ test("uplink circles show the hold instruction and live countdown", async () => 
   const start = rendererSource.indexOf("private drawObjectiveNode");
   const end = rendererSource.indexOf("private drawMine", start);
   const drawObjectiveNode = rendererSource.slice(start, end);
-  assert.match(drawObjectiveNode, /fillText\("HOLD HERE"/);
+  assert.match(drawObjectiveNode, /const uplinkLabelY = -78/);
+  assert.match(drawObjectiveNode, /actualBoundingBoxLeft/);
+  assert.match(drawObjectiveNode, /actualBoundingBoxAscent/);
+  assert.match(drawObjectiveNode, /fillText\(uplinkLabel, labelX, labelBaselineY\)/);
+  assert.match(drawObjectiveNode, /context\.lineWidth = 0\.6/);
   assert.match(drawObjectiveNode, /secondsRemaining \?\? 20/);
+  assert.doesNotMatch(drawObjectiveNode, /fillText\("HOLD HERE", 0, -8\)/);
 
   const engineSource = await readFile(
     new URL("../src/game/engine.ts", import.meta.url),
@@ -266,6 +342,18 @@ test("mission directions appear at the bottom temporarily and honor reduced moti
   assert.match(missionTip, /animation:\s*mission-tip-in-out/);
   assert.match(stylesheet, /@keyframes mission-tip-in-out[\s\S]*100%[\s\S]*opacity:\s*0/);
   assert.match(stylesheet, /@media \(prefers-reduced-motion: reduce\)[\s\S]*mission-tip-reduced/);
+});
+
+test("ammunition HUD is anchored below the minimap", async () => {
+  const stylesheet = await readFile(
+    new URL("../src/style.css", import.meta.url),
+    "utf8",
+  );
+  const start = stylesheet.indexOf(".ammo-readout {");
+  const end = stylesheet.indexOf(".ammo-readout > span", start);
+  const ammoReadout = stylesheet.slice(start, end);
+  assert.match(ammoReadout, /top:\s*auto/);
+  assert.match(ammoReadout, /bottom:\s*108px/);
 });
 
 test("player projectiles use the selected ammunition color", async () => {

@@ -22,6 +22,13 @@ test("campaign distributes varied objectives, bonuses, hazards, and specialist e
   assert.ok(MISSIONS.every((mission) => mission.bonus.label.length > 0));
   assert.ok(MISSIONS.slice(1).every((mission) => mission.hazards.length >= 2));
 
+  const barricades = MISSIONS.flatMap((mission) => (
+    mission.hazards.filter((hazard) => hazard.kind === "barricade")
+  ));
+  const barricadeSizes = new Set(barricades.map((hazard) => hazard.radius));
+  assert.ok(Math.min(...barricadeSizes) >= 30);
+  assert.ok(barricadeSizes.size >= 3);
+
   const enemyKinds = new Set(MISSIONS.flatMap((mission) => (
     mission.enemies.map((enemy) => enemy.kind)
   )));

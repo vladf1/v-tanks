@@ -7,7 +7,11 @@ import {
   cycleAmmo,
   placeMissionAmmoPacks,
 } from "../src/game/ammunition.ts";
-import { createMinefieldMines } from "../src/game/engine.ts";
+import {
+  MINE_BLAST_RADIUS,
+  collectMineChainReaction,
+  createMinefieldMines,
+} from "../src/game/engine.ts";
 import { MISSIONS, WORLD_HEIGHT, WORLD_WIDTH } from "../src/game/levels.ts";
 
 function seededRandom(seed) {
@@ -52,4 +56,26 @@ test("minefield hazards expand into five individually shootable mines", () => {
       && mine.armTime === 0
   )));
   assert.equal(new Set(mines.map(({ id }) => id)).size, 5);
+});
+
+test("mine blasts propagate through nearby mines", () => {
+  const createMine = (id, x) => ({
+    id,
+    owner: "enemy",
+    x,
+    y: 200,
+    armTime: 0,
+    life: Number.POSITIVE_INFINITY,
+    radius: 9,
+    fieldMine: true,
+  });
+  const initial = createMine(1, 100);
+  const adjacent = createMine(2, 100 + MINE_BLAST_RADIUS - 2);
+  const chained = createMine(3, 100 + (MINE_BLAST_RADIUS - 2) * 2);
+  const distant = createMine(4, 500);
+
+  assert.deepEqual(
+    collectMineChainReaction(initial, [adjacent, chained, distant]).map(({ id }) => id),
+    [1, 2, 3],
+  );
 });

@@ -66,7 +66,7 @@ function getTankRoleAccent(kind: Tank["kind"], accent: string): string {
 
 function traceOilBlob(
   context: CanvasRenderingContext2D,
-  decal: Decal,
+  decal: Pick<Decal, "id" | "x" | "y">,
   salt: number,
   centerX: number,
   centerY: number,
@@ -132,10 +132,24 @@ export class GameRenderer {
   private displayScale = 1;
   private displayOffsetX = 0;
   private displayOffsetY = 0;
+  private displayWidth = 1;
+  private displayHeight = 1;
   private dpr = 1;
   private cameraX = 0;
   private cameraY = 0;
   private activeTheme: VisualTheme = VISUAL_THEMES["proving-ground"];
+  private groundLayer?: { key: string; canvas: HTMLCanvasElement };
+  private wallLayer?: {
+    key: string;
+    items: Array<{
+      canvas: HTMLCanvasElement;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>;
+  };
+  private backdropLayer?: HTMLCanvasElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -343,13 +357,12 @@ export class GameRenderer {
 
   render(state: RenderState): void {
     const context = this.context;
-    const rect = this.canvas.getBoundingClientRect();
     const camera = state.phase === "menu" ? { x: 0, y: 0 } : getCameraPosition(state.player);
     this.cameraX = camera.x;
     this.cameraY = camera.y;
     context.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     context.fillStyle = "#020504";
-    context.fillRect(0, 0, rect.width, rect.height);
+    context.fillRect(0, 0, this.displayWidth, this.displayHeight);
     context.translate(this.displayOffsetX, this.displayOffsetY);
     context.scale(this.displayScale, this.displayScale);
     context.save();
@@ -371,6 +384,7 @@ export class GameRenderer {
         WORLD_WIDTH,
         WORLD_HEIGHT,
         GROUND_OVERSCAN,
+        true,
       );
       this.drawMission(context, state);
       context.restore();
@@ -381,6 +395,8 @@ export class GameRenderer {
 
   private resize(): void {
     const rect = this.canvas.getBoundingClientRect();
+    this.displayWidth = rect.width;
+    this.displayHeight = rect.height;
     this.dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.max(1, Math.round(rect.width * this.dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * this.dpr));
@@ -392,6 +408,25 @@ export class GameRenderer {
   private drawBackdrop(
     context: CanvasRenderingContext2D,
     _attractTime: number,
+    width: number,
+    height: number,
+  ): void {
+    if (!this.backdropLayer
+      || this.backdropLayer.width !== width
+      || this.backdropLayer.height !== height) {
+      const layer = document.createElement("canvas");
+      layer.width = width;
+      layer.height = height;
+      const layerContext = layer.getContext("2d");
+      if (!layerContext) return;
+      this.paintBackdrop(layerContext, width, height);
+      this.backdropLayer = layer;
+    }
+    context.drawImage(this.backdropLayer, 0, 0);
+  }
+
+  private paintBackdrop(
+    context: CanvasRenderingContext2D,
     width: number,
     height: number,
   ): void {
@@ -437,9 +472,38 @@ export class GameRenderer {
     width: number,
     height: number,
     overscan = 0,
+    includeEnvironmentalDetails = false,
   ): void {
     const theme = VISUAL_THEMES[mission.visualTheme];
     this.activeTheme = theme;
+    const key = `${mission.number}:${mission.visualTheme}:${width}:${height}:${overscan}:${includeEnvironmentalDetails}`;
+    let layer = this.groundLayer?.key === key ? this.groundLayer.canvas : undefined;
+    if (!layer) {
+      layer = document.createElement("canvas");
+      layer.width = width + overscan * 2;
+      layer.height = height + overscan * 2;
+      const layerContext = layer.getContext("2d");
+      if (!layerContext) return;
+      layerContext.translate(overscan, overscan);
+      this.paintGround(layerContext, mission, width, height, overscan);
+      if (includeEnvironmentalDetails) {
+        for (const decal of generateEnvironmentalDetails(mission)) {
+          this.drawDecal(layerContext, decal);
+        }
+      }
+      this.groundLayer = { key, canvas: layer };
+    }
+    context.drawImage(layer, -overscan, -overscan);
+  }
+
+  private paintGround(
+    context: CanvasRenderingContext2D,
+    mission: Mission,
+    width: number,
+    height: number,
+    overscan: number,
+  ): void {
+    const theme = VISUAL_THEMES[mission.visualTheme];
     const minX = -overscan;
     const minY = -overscan;
     const maxX = width + overscan;
@@ -527,14 +591,20 @@ export class GameRenderer {
   }
 
   private drawMission(context: CanvasRenderingContext2D, state: RenderState): void {
-    for (const decal of state.decals) this.drawDecal(context, decal);
-    for (const mark of state.trackMarks) this.drawTrackMark(context, mark);
-    for (const wall of state.mission.walls) this.drawWall(context, wall);
+    for (const decal of state.decals) {
+      if (decal.id >= 0 && this.isVisible(decal, decal.size + 30)) this.drawDecal(context, decal);
+    }
+    for (const mark of state.trackMarks) {
+      if (this.isVisible(mark, 24)) this.drawTrackMark(context, mark);
+    }
+    this.drawWallLayer(context, state.mission);
     for (const hazard of state.hazards) {
-      if (hazard.active) this.drawHazard(context, hazard, state.attractTime);
+      if (hazard.active && this.isVisible(hazard, hazard.radius + 30)) {
+        this.drawHazard(context, hazard, state.attractTime);
+      }
     }
     for (const node of state.objectiveNodes) {
-      if (node.active) {
+      if (node.active && this.isVisible(node, node.radius + 44)) {
         this.drawObjectiveNode(
           context,
           node,
@@ -543,21 +613,33 @@ export class GameRenderer {
         );
       }
     }
-    for (const mine of state.mines) this.drawMine(context, mine, state.attractTime);
-    for (const strike of state.artilleryStrikes) this.drawArtilleryStrike(context, strike);
-    for (const wreck of state.wrecks) this.drawWreck(context, wreck);
+    for (const mine of state.mines) {
+      if (this.isVisible(mine, 32)) this.drawMine(context, mine, state.attractTime);
+    }
+    for (const strike of state.artilleryStrikes) {
+      if (this.isVisible(strike, strike.radius + 20)) this.drawArtilleryStrike(context, strike);
+    }
+    for (const wreck of state.wrecks) {
+      if (this.isVisible(wreck, 48)) this.drawWreck(context, wreck);
+    }
     for (const turret of state.ejectedTurrets) {
-      if (turret.landed) this.drawEjectedTurret(context, turret);
+      if (turret.landed && this.isVisible(turret, 48)) this.drawEjectedTurret(context, turret);
     }
     for (const powerUp of state.powerUps) {
-      if (powerUp.active) this.drawPowerUp(context, powerUp, state.attractTime);
+      if (powerUp.active && this.isVisible(powerUp, 40)) {
+        this.drawPowerUp(context, powerUp, state.attractTime);
+      }
     }
     for (const ammoPack of state.ammoPacks) {
-      if (ammoPack.active) this.drawAmmoPack(context, ammoPack, state.attractTime);
+      if (ammoPack.active && this.isVisible(ammoPack, 40)) {
+        this.drawAmmoPack(context, ammoPack, state.attractTime);
+      }
     }
-    for (const projectile of state.projectiles) this.drawProjectile(context, projectile);
+    for (const projectile of state.projectiles) {
+      if (this.isVisible(projectile, 48)) this.drawProjectile(context, projectile);
+    }
     for (const enemy of state.enemies) {
-      if (!enemy.alive) continue;
+      if (!enemy.alive || !this.isVisible(enemy, enemy.radius + 44)) continue;
       this.drawTank(context, enemy, ENEMY_COLOR, enemy.kind === "boss" ? "#ffe27a" : ENEMY_ACCENT);
       if (enemy.kind === "boss") this.drawBossArmor(context, enemy, state.attractTime);
       this.drawTankHealthBar(context, enemy, ENEMY_COLOR);
@@ -574,10 +656,52 @@ export class GameRenderer {
       this.drawTankHealthBar(context, state.player, PLAYER_COLOR);
     }
     for (const turret of state.ejectedTurrets) {
-      if (!turret.landed) this.drawEjectedTurret(context, turret);
+      if (!turret.landed && this.isVisible(turret, 64)) this.drawEjectedTurret(context, turret);
     }
-    for (const particle of state.particles) this.drawParticle(context, particle);
-    this.drawCrosshair(context, state.mouse);
+    for (const particle of state.particles) {
+      if (this.isVisible(particle, particle.size + 32)) this.drawParticle(context, particle);
+    }
+    if (this.isVisible(state.mouse, 16)) this.drawCrosshair(context, state.mouse);
+  }
+
+  private isVisible(point: Point, margin: number): boolean {
+    return point.x >= this.cameraX - margin
+      && point.x <= this.cameraX + VIEW_WIDTH + margin
+      && point.y >= this.cameraY - margin
+      && point.y <= this.cameraY + VIEW_HEIGHT + margin;
+  }
+
+  private drawWallLayer(context: CanvasRenderingContext2D, mission: Mission): void {
+    const renderScale = Math.max(1, this.dpr * this.displayScale);
+    const key = `${mission.number}:${renderScale.toFixed(3)}`;
+    let items = this.wallLayer?.key === key ? this.wallLayer.items : undefined;
+    if (!items) {
+      const padding = 18;
+      items = mission.walls.map((wall) => {
+        const width = wall.width + padding * 2;
+        const height = wall.height + padding * 2;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.ceil(width * renderScale));
+        canvas.height = Math.max(1, Math.ceil(height * renderScale));
+        const layerContext = canvas.getContext("2d");
+        if (layerContext) {
+          layerContext.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+          layerContext.translate(-wall.x + padding, -wall.y + padding);
+          this.drawWall(layerContext, wall);
+        }
+        return {
+          canvas,
+          x: wall.x - padding,
+          y: wall.y - padding,
+          width,
+          height,
+        };
+      });
+      this.wallLayer = { key, items };
+    }
+    for (const item of items) {
+      context.drawImage(item.canvas, item.x, item.y, item.width, item.height);
+    }
   }
 
   private drawDecal(context: CanvasRenderingContext2D, decal: Decal): void {
@@ -634,7 +758,7 @@ export class GameRenderer {
       context.beginPath();
       context.ellipse(decal.size * 0.12, 0, decal.size * 0.56, decal.size * 0.3, -0.2, 0, TAU);
       context.fill();
-    } else if (decal.kind === "crater" || decal.kind === "mine-crater") {
+    } else if (decal.kind === "crater") {
       context.lineWidth = Math.max(1.4, decal.size * 0.12);
       context.beginPath();
       context.ellipse(0, 0, decal.size, decal.size * 0.7, 0, 0, TAU);
@@ -644,6 +768,46 @@ export class GameRenderer {
       context.beginPath();
       context.ellipse(0, 2, decal.size * 0.72, decal.size * 0.45, 0, 0, TAU);
       context.fill();
+    } else if (decal.kind === "mine-crater") {
+      const blastSeed = decal.id * 47 + Math.round(decal.x) * 3 + Math.round(decal.y) * 5;
+      context.globalAlpha *= 0.5;
+      context.fillStyle = "#020504";
+      context.beginPath();
+      for (let index = 0; index < 11; index += 1) {
+        const angle = (index / 11) * TAU;
+        const radius = decal.size * (0.38 + noise(blastSeed + index * 13) * 0.38);
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+      context.closePath();
+      context.fill();
+
+      context.globalAlpha *= 0.72;
+      context.strokeStyle = decal.color;
+      context.lineWidth = Math.max(1, decal.size * 0.055);
+      for (let index = 0; index < 6; index += 1) {
+        const angle = noise(blastSeed + index * 31) * TAU;
+        const innerRadius = decal.size * (0.16 + noise(blastSeed + index * 37) * 0.12);
+        const outerRadius = decal.size * (0.56 + noise(blastSeed + index * 41) * 0.3);
+        context.beginPath();
+        context.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+        context.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+        context.stroke();
+      }
+
+      context.fillStyle = decal.color;
+      for (let index = 0; index < 4; index += 1) {
+        const angle = noise(blastSeed + index * 53) * TAU;
+        const distance = decal.size * (0.66 + noise(blastSeed + index * 59) * 0.34);
+        const fragmentSize = 1.2 + noise(blastSeed + index * 61) * 1.6;
+        context.save();
+        context.translate(Math.cos(angle) * distance, Math.sin(angle) * distance);
+        context.rotate(angle + noise(blastSeed + index * 67));
+        context.fillRect(-fragmentSize, -fragmentSize * 0.45, fragmentSize * 2, fragmentSize * 0.9);
+        context.restore();
+      }
     } else if (decal.kind === "wall-chip" || decal.kind === "casings") {
       context.lineWidth = decal.kind === "casings" ? 1.6 : 2.2;
       for (let index = 0; index < (decal.kind === "casings" ? 5 : 3); index += 1) {
@@ -810,7 +974,7 @@ export class GameRenderer {
   private drawHazard(
     context: CanvasRenderingContext2D,
     hazard: HazardState,
-    _time: number,
+    time: number,
   ): void {
     context.save();
     context.translate(hazard.x, hazard.y);
@@ -825,42 +989,138 @@ export class GameRenderer {
       context.restore();
     }
     if (hazard.kind === "mud") {
-      context.fillStyle = "rgba(92, 70, 42, 0.32)";
-      context.strokeStyle = "rgba(177, 139, 82, 0.38)";
-      context.lineWidth = 1.2;
-      context.beginPath();
-      context.ellipse(0, 0, hazard.radius, hazard.radius * 0.72, 0.2, 0, TAU);
+      const mudSeed = hazard.id * 71 + Math.round(hazard.x + hazard.y);
+      const patchAngle = (noise(mudSeed) - 0.5) * 0.42;
+      context.rotate(patchAngle);
+
+      context.fillStyle = "rgba(78, 57, 31, 0.48)";
+      context.strokeStyle = "rgba(177, 139, 82, 0.42)";
+      context.lineWidth = 1.1;
+      traceOilBlob(context, hazard, 17, 0, 0, hazard.radius, hazard.radius * 0.72, 15);
       context.fill();
       context.stroke();
-      for (let index = 0; index < 7; index += 1) {
-        const angle = index * 2.3;
-        context.fillStyle = "rgba(25, 20, 13, 0.28)";
+
+      context.fillStyle = "rgba(23, 18, 11, 0.34)";
+      traceOilBlob(
+        context,
+        hazard,
+        113,
+        hazard.radius * 0.08,
+        hazard.radius * 0.02,
+        hazard.radius * 0.68,
+        hazard.radius * 0.43,
+        12,
+      );
+      context.fill();
+
+      context.lineCap = "round";
+      for (const side of [-1, 1]) {
+        const y = side * hazard.radius * 0.19;
+        context.strokeStyle = "rgba(12, 11, 7, 0.52)";
+        context.lineWidth = 3.2;
         context.beginPath();
-        context.arc(Math.cos(angle) * 30, Math.sin(angle) * 21, 4 + index % 3, 0, TAU);
+        context.moveTo(-hazard.radius * 0.72, y - 2);
+        context.bezierCurveTo(
+          -hazard.radius * 0.28,
+          y + side * 3,
+          hazard.radius * 0.28,
+          y - side * 4,
+          hazard.radius * 0.7,
+          y + 1,
+        );
+        context.stroke();
+        context.strokeStyle = "rgba(198, 155, 91, 0.22)";
+        context.lineWidth = 0.9;
+        context.setLineDash([3, 6]);
+        context.stroke();
+        context.setLineDash([]);
+      }
+
+      for (let index = 0; index < 8; index += 1) {
+        const angle = noise(mudSeed + index * 19) * TAU;
+        const distance = hazard.radius * (0.42 + noise(mudSeed + index * 23) * 0.48);
+        const clumpSize = 1.8 + noise(mudSeed + index * 29) * 3.2;
+        context.save();
+        context.translate(
+          Math.cos(angle) * distance,
+          Math.sin(angle) * distance * 0.68,
+        );
+        context.rotate(noise(mudSeed + index * 31) * TAU);
+        context.fillStyle = index % 3 === 0
+          ? "rgba(197, 151, 86, 0.28)"
+          : "rgba(18, 15, 9, 0.48)";
+        context.beginPath();
+        context.moveTo(-clumpSize, clumpSize * 0.35);
+        context.lineTo(-clumpSize * 0.4, -clumpSize * 0.7);
+        context.lineTo(clumpSize * 0.8, -clumpSize * 0.28);
+        context.lineTo(clumpSize * 0.55, clumpSize * 0.62);
+        context.closePath();
         context.fill();
+        context.restore();
       }
     } else if (hazard.kind === "barrel") {
-      context.fillStyle = "#39100d";
-      context.strokeStyle = "#ff9b66";
-      context.lineWidth = 1.5;
-      context.fillRect(-10, -14, 20, 28);
-      context.strokeRect(-10, -14, 20, 28);
-      context.fillStyle = "#ff9b66";
-      context.fillRect(-10, -8, 20, 3);
-      context.fillRect(-10, 6, 20, 3);
-      context.font = "bold 10px monospace";
+      const barrelAngle = (hazard.id % 12) * Math.PI / 18;
+      context.rotate(barrelAngle);
+
+      const barrelBody = context.createRadialGradient(-5, -6, 2, 0, 0, 17);
+      barrelBody.addColorStop(0, "#a33c24");
+      barrelBody.addColorStop(0.62, "#6d2118");
+      barrelBody.addColorStop(1, "#2b0b09");
+      context.fillStyle = barrelBody;
+      context.strokeStyle = "#ff8f58";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(0, 0, 16, 0, TAU);
+      context.fill();
+      context.stroke();
+
+      context.strokeStyle = "rgba(255, 183, 125, 0.7)";
+      context.lineWidth = 1.4;
+      context.beginPath();
+      context.arc(0, 0, 12.5, 0, TAU);
+      context.stroke();
+      context.strokeStyle = "rgba(255, 214, 171, 0.72)";
+      context.beginPath();
+      context.arc(0, 0, 14.2, Math.PI * 1.12, Math.PI * 1.72);
+      context.stroke();
+
+      context.fillStyle = "#1a0908";
+      context.strokeStyle = "#ffb06f";
+      context.lineWidth = 1.2;
+      context.beginPath();
+      context.arc(-6.5, -6, 2.5, 0, TAU);
+      context.fill();
+      context.stroke();
+
+      context.fillStyle = "#ffc85d";
+      context.strokeStyle = "#2b0b09";
+      context.lineWidth = 1.1;
+      context.beginPath();
+      context.moveTo(0, -8);
+      context.lineTo(8, 7);
+      context.lineTo(-8, 7);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.fillStyle = "#3a100c";
+      context.font = "900 9px monospace";
       context.textAlign = "center";
-      context.fillText("!", 0, 3);
+      context.textBaseline = "middle";
+      context.fillText("!", 0, 2);
     } else if (hazard.kind === "minefield") {
       for (let index = 0; index < 5; index += 1) {
         const angle = index * TAU / 5 + hazard.id * 0.73;
         const distance = index === 0 ? 0 : 23 + (index % 2) * 6;
-        context.fillStyle = "#32100e";
-        context.strokeStyle = ENEMY_COLOR;
-        context.beginPath();
-        context.arc(Math.cos(angle) * distance, Math.sin(angle) * distance, 6, 0, TAU);
-        context.fill();
-        context.stroke();
+        this.drawMine(context, {
+          id: hazard.id * 10 + index,
+          owner: "enemy",
+          x: Math.cos(angle) * distance,
+          y: Math.sin(angle) * distance,
+          armTime: 0,
+          life: Number.POSITIVE_INFINITY,
+          radius: 9,
+          fieldMine: true,
+        }, time);
       }
     } else if (hazard.kind === "repair-station") {
       context.fillStyle = "#09251b";
@@ -873,40 +1133,43 @@ export class GameRenderer {
       context.fillRect(-11, -3, 22, 6);
     } else if (hazard.kind === "barricade") {
       const barrierAngle = (hazard.id % 4) * Math.PI / 4 + Math.PI / 8;
+      const halfWidth = hazard.radius * 1.16;
+      const halfHeight = hazard.radius * 0.5;
+      const footWidth = Math.max(8, hazard.radius * 0.24);
       context.save();
       context.rotate(barrierAngle);
       context.fillStyle = "#080b09";
-      context.fillRect(-22, -13, 9, 26);
-      context.fillRect(13, -13, 9, 26);
+      context.fillRect(-halfWidth, -halfHeight - 3, footWidth, halfHeight * 2 + 6);
+      context.fillRect(halfWidth - footWidth, -halfHeight - 3, footWidth, halfHeight * 2 + 6);
       context.fillStyle = "#4d5550";
       context.strokeStyle = "#d5ded8";
       context.lineWidth = 1.4;
       context.beginPath();
-      context.moveTo(-23, -10);
-      context.lineTo(23, -10);
-      context.lineTo(19, 10);
-      context.lineTo(-19, 10);
+      context.moveTo(-halfWidth, -halfHeight);
+      context.lineTo(halfWidth, -halfHeight);
+      context.lineTo(halfWidth - 4, halfHeight);
+      context.lineTo(-halfWidth + 4, halfHeight);
       context.closePath();
       context.fill();
       context.stroke();
       context.fillStyle = "#69716c";
       context.beginPath();
-      context.moveTo(-20, -8);
-      context.lineTo(20, -8);
-      context.lineTo(17, -2);
-      context.lineTo(-17, -2);
+      context.moveTo(-halfWidth + 3, -halfHeight + 2);
+      context.lineTo(halfWidth - 3, -halfHeight + 2);
+      context.lineTo(halfWidth - 6, -halfHeight * 0.18);
+      context.lineTo(-halfWidth + 6, -halfHeight * 0.18);
       context.closePath();
       context.fill();
       context.strokeStyle = "#ffb45f";
       context.lineWidth = 3;
-      for (let x = -14; x <= 14; x += 9) {
+      for (let x = -halfWidth + 9; x <= halfWidth - 7; x += 12) {
         context.beginPath();
-        context.moveTo(x - 4, 7);
-        context.lineTo(x + 3, -7);
+        context.moveTo(x - 5, halfHeight - 3);
+        context.lineTo(x + 4, -halfHeight + 3);
         context.stroke();
       }
       context.fillStyle = "#1b211d";
-      for (const x of [-15, 15]) {
+      for (const x of [-halfWidth + footWidth * 0.5, halfWidth - footWidth * 0.5]) {
         context.beginPath();
         context.arc(x, 0, 2, 0, TAU);
         context.fill();
@@ -914,17 +1177,19 @@ export class GameRenderer {
       context.restore();
       context.strokeStyle = "rgba(255, 180, 95, 0.82)";
       context.lineWidth = 1.2;
+      const calloutHalfWidth = Math.max(27, hazard.radius * 0.76);
+      const calloutY = -hazard.radius * 1.28;
       for (const side of [-1, 1]) {
         context.beginPath();
-        context.moveTo(side * 25, -10);
-        context.lineTo(side * 25, -18);
-        context.lineTo(side * 17, -18);
+        context.moveTo(side * calloutHalfWidth, calloutY + 8);
+        context.lineTo(side * calloutHalfWidth, calloutY);
+        context.lineTo(side * (calloutHalfWidth - 8), calloutY);
         context.stroke();
       }
       context.fillStyle = "#ffcf87";
       context.font = "bold 7px monospace";
       context.textAlign = "center";
-      context.fillText("SHOOT TO BREACH", 0, -23);
+      context.fillText("SHOOT TO BREACH", 0, calloutY - 5);
     }
     context.restore();
   }
@@ -1018,13 +1283,26 @@ export class GameRenderer {
       context.fill();
       if (node.kind === "uplink") {
         context.globalAlpha = 1;
-        context.fillStyle = "#fff4bf";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
+        const uplinkLabel = `HOLD HERE  ${secondsRemaining ?? 20}s`;
+        const uplinkLabelY = -78;
         context.font = "800 9px monospace";
-        context.fillText("HOLD HERE", 0, -8);
-        context.font = "800 18px monospace";
-        context.fillText(`${secondsRemaining ?? 20}s`, 0, 12);
+        context.textAlign = "left";
+        context.textBaseline = "alphabetic";
+        const labelMetrics = context.measureText(uplinkLabel);
+        const labelInkWidth = labelMetrics.actualBoundingBoxLeft + labelMetrics.actualBoundingBoxRight;
+        const labelInkHeight = labelMetrics.actualBoundingBoxAscent + labelMetrics.actualBoundingBoxDescent;
+        const labelWidth = Math.max(76, labelInkWidth + 14);
+        const labelHeight = Math.max(18, labelInkHeight + 8);
+        const labelX = (labelMetrics.actualBoundingBoxLeft - labelMetrics.actualBoundingBoxRight) / 2;
+        const labelBaselineY = uplinkLabelY
+          + (labelMetrics.actualBoundingBoxAscent - labelMetrics.actualBoundingBoxDescent) / 2;
+        context.fillStyle = "rgba(4, 14, 12, 0.94)";
+        context.strokeStyle = "rgba(255, 226, 122, 0.62)";
+        context.lineWidth = 0.6;
+        context.fillRect(-labelWidth / 2, uplinkLabelY - labelHeight / 2, labelWidth, labelHeight);
+        context.strokeRect(-labelWidth / 2, uplinkLabelY - labelHeight / 2, labelWidth, labelHeight);
+        context.fillStyle = "#fff4bf";
+        context.fillText(uplinkLabel, labelX, labelBaselineY);
       }
     }
     context.restore();
@@ -1038,17 +1316,71 @@ export class GameRenderer {
     context.save();
     context.translate(mine.x, mine.y);
     const color = mine.owner === "player" ? PLAYER_COLOR : ENEMY_COLOR;
+    const armed = mine.armTime <= 0;
+    const pulse = armed ? 0.68 + Math.sin(time * 8 + mine.id) * 0.24 : 0.28;
+    context.rotate((mine.id % 8) * Math.PI / 16);
+
+    context.fillStyle = "rgba(0, 0, 0, 0.42)";
+    context.beginPath();
+    context.moveTo(-8, 4);
+    context.lineTo(6, 6);
+    context.lineTo(9, 9);
+    context.lineTo(-7, 8);
+    context.closePath();
+    context.fill();
+
+    context.strokeStyle = "#020504";
+    context.lineWidth = 3.6;
+    for (let index = 0; index < 4; index += 1) {
+      const angle = index * Math.PI / 2;
+      context.beginPath();
+      context.moveTo(Math.cos(angle) * 5.5, Math.sin(angle) * 5.5);
+      context.lineTo(Math.cos(angle) * 11.5, Math.sin(angle) * 11.5);
+      context.stroke();
+    }
+    context.strokeStyle = color;
+    context.globalAlpha = 0.72;
+    context.lineWidth = 1.1;
+    for (let index = 0; index < 4; index += 1) {
+      const angle = index * Math.PI / 2;
+      context.beginPath();
+      context.moveTo(Math.cos(angle) * 6, Math.sin(angle) * 6);
+      context.lineTo(Math.cos(angle) * 11, Math.sin(angle) * 11);
+      context.stroke();
+    }
+
+    context.globalAlpha = 1;
     context.fillStyle = "#080b09";
     context.strokeStyle = color;
-    context.lineWidth = 1.4;
+    context.lineWidth = 1.5;
     context.beginPath();
-    context.arc(0, 0, mine.radius, 0, TAU);
+    for (let index = 0; index < 8; index += 1) {
+      const angle = Math.PI / 8 + (index / 8) * TAU;
+      const radius = index % 2 === 0 ? mine.radius : mine.radius * 0.82;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.closePath();
     context.fill();
     context.stroke();
-    context.fillStyle = color;
-    context.globalAlpha = mine.armTime <= 0 ? 0.6 + Math.sin(time * 8) * 0.35 : 0.3;
+
+    context.globalAlpha = 0.48;
+    context.strokeStyle = "#effff7";
+    context.lineWidth = 0.8;
     context.beginPath();
-    context.arc(0, 0, 3, 0, TAU);
+    context.arc(0, 0, mine.radius * 0.52, 0, TAU);
+    context.stroke();
+
+    context.fillStyle = color;
+    context.globalAlpha = pulse;
+    context.beginPath();
+    context.moveTo(0, -3.2);
+    context.lineTo(3.2, 0);
+    context.lineTo(0, 3.2);
+    context.lineTo(-3.2, 0);
+    context.closePath();
     context.fill();
     context.restore();
   }
@@ -1222,14 +1554,12 @@ export class GameRenderer {
     active: ActivePowerUps,
     time: number,
   ): void {
-    const activeKinds = (["speed", "gun", "ricochet"] as const).filter(
-      (kind) => active[kind] > 0,
-    );
-
     context.save();
     context.translate(player.x, player.y);
     context.lineWidth = 1.4;
-    for (const [index, kind] of activeKinds.entries()) {
+    let index = 0;
+    for (const kind of ["speed", "gun", "ricochet"] as const) {
+      if (active[kind] <= 0) continue;
       context.save();
       context.rotate(time * (0.5 + index * 0.16) * (index % 2 === 0 ? 1 : -1));
       context.strokeStyle = POWER_UP_DEFINITIONS[kind].color;
@@ -1239,6 +1569,7 @@ export class GameRenderer {
       context.arc(0, 0, 24 + index * 3.5, 0, TAU);
       context.stroke();
       context.restore();
+      index += 1;
     }
 
     if (active.shield > 0 && active.shieldPoints > 0) {
@@ -1574,14 +1905,6 @@ export class GameRenderer {
     this.drawTankHull(context, tank.kind, color, roleAccent);
     context.restore();
 
-    context.save();
-    context.translate(tankX, tankY);
-    context.rotate(tank.turretAngle);
-    context.translate(-recoilOffset, 0);
-    context.scale(scale, scale);
-    this.drawTankTurret(context, tank.kind, color, roleAccent);
-    context.restore();
-
     if (tank.kind === "player" && tank.playerClass) {
       context.save();
       context.translate(tankX, tankY);
@@ -1614,6 +1937,14 @@ export class GameRenderer {
       }
       context.restore();
     }
+
+    context.save();
+    context.translate(tankX, tankY);
+    context.rotate(tank.turretAngle);
+    context.translate(-recoilOffset, 0);
+    context.scale(scale, scale);
+    this.drawTankTurret(context, tank.kind, color, roleAccent);
+    context.restore();
 
     if ((tank.damageFlash ?? 0) > 0) {
       const relativeDirection = (tank.lastHitDirection ?? 0);
@@ -2033,8 +2364,9 @@ export class GameRenderer {
   private drawProjectile(context: CanvasRenderingContext2D, projectile: Projectile): void {
     context.save();
     const kind = projectile.kind ?? "basic";
-    const speed = Math.hypot(projectile.velocityX, projectile.velocityY);
-    const angle = speed > 0.001
+    const speedSquared = projectile.velocityX * projectile.velocityX
+      + projectile.velocityY * projectile.velocityY;
+    const angle = speedSquared > 0.000001
       ? Math.atan2(projectile.velocityY, projectile.velocityX)
       : 0;
     const shellLength = (Math.max(10, projectile.radius * 3.2) + (projectile.damage > 1 ? 4 : 0))
@@ -2121,7 +2453,7 @@ export class GameRenderer {
       context.beginPath();
       context.arc(0, 0, particle.size, 0, TAU);
       context.fill();
-      if (particle.color.toLowerCase() === "#7bdcff") {
+      if (particle.color === "#7bdcff") {
         context.globalAlpha = life * 0.9;
         context.strokeStyle = particle.color;
         context.lineWidth = 2;

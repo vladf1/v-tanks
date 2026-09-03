@@ -55,3 +55,14 @@ test("ultra-aggressive enemies move quickly and reload more than twice as fast",
   assert.ok(hunterArtillery.speed > 0);
   assert.ok(hunterReload < normalReload / 2);
 });
+
+test("enemy behavior profiles are reused across simulation steps", () => {
+  assert.equal(
+    getEnemyBehaviorProfile("guard", false),
+    getEnemyBehaviorProfile("guard", false),
+  );
+  assert.equal(
+    getEnemyBehaviorProfile("guard", true),
+    getEnemyBehaviorProfile("guard", true),
+  );
+});

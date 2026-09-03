@@ -411,7 +411,7 @@
         }, 1.4);
       });
 
-      const hazardKinds = ["barrel", "mud", "minefield", "repair-station", "barricade"];
+      const hazardKinds = ["barrel", "mud", "minefield", "repair-station"];
       hazardKinds.forEach((kind, index) => {
         const { figure, canvas } = createCard(
           kind.replace("-", " "),
@@ -426,6 +426,26 @@
           x: 60,
           y: kind === "relay" ? 33 : 30,
           radius: kind === "mud" ? 28 : 20,
+          active: true,
+          cooldown: 0,
+        }, 1.25);
+      });
+
+      [30, 38, 46].forEach((radius, index) => {
+        const sizeLabel = ["small", "medium", "large"][index];
+        const { figure, canvas } = createCard(
+          `barricade / ${sizeLabel}`,
+          `${radius}-unit collision radius`,
+          "obstacle",
+        );
+        effectsRoot.append(figure);
+        const context = prepareCanvas(canvas, 140, 140, 3);
+        GameRenderer.renderHazardPreview(context, {
+          id: 20 + index,
+          kind: "barricade",
+          x: 70,
+          y: 82,
+          radius,
           active: true,
           cooldown: 0,
         }, 1.25);

@@ -84,6 +84,7 @@ import {
 
 export type GamePhase = "menu" | "playing" | "paused" | "victory" | "defeat";
 export type GameMode = "campaign" | "survival";
+export const MINE_BLAST_RADIUS = 82;
 
 export interface GameSnapshot {
   phase: GamePhase;
@@ -228,6 +229,8 @@ const PLAYER_SPEED = 184;
 const TANK_GUTTER = 24;
 const TAU = Math.PI * 2;
 export const PROJECTILE_INTERCEPTION_PADDING = 4;
+export const PROJECTILE_INTERCEPTION_BLAST_RADIUS = 44;
+export const PROJECTILE_INTERCEPTION_DAMAGE = 1;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -280,43 +283,43 @@ function segmentIntersectsWall(from: Point, to: Point, wall: Wall, padding = 0):
   let near = 0;
   let far = 1;
 
-  for (const [start, delta, min, max] of [
-    [from.x, dx, left, right],
-    [from.y, dy, top, bottom],
-  ] as const) {
-    if (Math.abs(delta) < 0.0001) {
-      if (start < min || start > max) return false;
-      continue;
-    }
-    const first = (min - start) / delta;
-    const second = (max - start) / delta;
-    const entry = Math.min(first, second);
-    const exit = Math.max(first, second);
-    near = Math.max(near, entry);
-    far = Math.min(far, exit);
+  if (Math.abs(dx) < 0.0001) {
+    if (from.x < left || from.x > right) return false;
+  } else {
+    const first = (left - from.x) / dx;
+    const second = (right - from.x) / dx;
+    near = Math.max(near, Math.min(first, second));
+    far = Math.min(far, Math.max(first, second));
     if (near > far) return false;
+  }
+  if (Math.abs(dy) < 0.0001) return from.y >= top && from.y <= bottom;
+  const first = (top - from.y) / dy;
+  const second = (bottom - from.y) / dy;
+  near = Math.max(near, Math.min(first, second));
+  far = Math.min(far, Math.max(first, second));
+  return near <= far;
+}
+
+function hasLineOfSight(from: Point, to: Point, walls: Wall[]): boolean {
+  for (const wall of walls) {
+    if (segmentIntersectsWall(from, to, wall, 3)) return false;
   }
   return true;
 }
 
-function hasLineOfSight(from: Point, to: Point, walls: Wall[]): boolean {
-  return !walls.some((wall) => segmentIntersectsWall(from, to, wall, 3));
-}
-
-function segmentDistanceSquared(from: Point, to: Point, point: Point): number {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
+function projectileSegmentDistanceSquared(projectile: Projectile, point: Point): number {
+  const dx = projectile.previousX - projectile.x;
+  const dy = projectile.previousY - projectile.y;
   const lengthSquared = (dx * dx) + (dy * dy);
-  if (lengthSquared === 0) return distanceSquared(from, point);
+  if (lengthSquared === 0) return distanceSquared(projectile, point);
   const amount = clamp(
-    (((point.x - from.x) * dx) + ((point.y - from.y) * dy)) / lengthSquared,
+    (((point.x - projectile.x) * dx) + ((point.y - projectile.y) * dy)) / lengthSquared,
     0,
     1,
   );
-  return distanceSquared(
-    { x: from.x + (dx * amount), y: from.y + (dy * amount) },
-    point,
-  );
+  const separationX = projectile.x + (dx * amount) - point.x;
+  const separationY = projectile.y + (dy * amount) - point.y;
+  return separationX * separationX + separationY * separationY;
 }
 
 export function findProjectileInterception(
@@ -359,6 +362,25 @@ export function findProjectileInterception(
   };
 }
 
+export function getProjectileInterceptionBlastRadius(
+  first: Pick<Projectile, "explosionRadius">,
+  second: Pick<Projectile, "explosionRadius">,
+): number {
+  return Math.max(
+    PROJECTILE_INTERCEPTION_BLAST_RADIUS,
+    first.explosionRadius,
+    second.explosionRadius,
+  );
+}
+
+export function isPointInsideProjectileInterceptionBlast(
+  point: Point,
+  interception: Point,
+  blastRadius: number,
+): boolean {
+  return distanceSquared(point, interception) < blastRadius * blastRadius;
+}
+
 export function createMinefieldMines(hazards: HazardSpawn[]): ProximityMine[] {
   return hazards.flatMap((hazard) => {
     if (hazard.kind !== "minefield") return [];
@@ -377,6 +399,25 @@ export function createMinefieldMines(hazards: HazardSpawn[]): ProximityMine[] {
       };
     });
   });
+}
+
+export function collectMineChainReaction(
+  initialMine: ProximityMine,
+  candidates: readonly ProximityMine[],
+  blastRadius = MINE_BLAST_RADIUS,
+): ProximityMine[] {
+  const chain = [initialMine];
+  const queued = new Set<ProximityMine>(chain);
+  const blastRadiusSquared = blastRadius * blastRadius;
+  for (let index = 0; index < chain.length; index += 1) {
+    const source = chain[index];
+    for (const candidate of candidates) {
+      if (queued.has(candidate) || distanceSquared(source, candidate) > blastRadiusSquared) continue;
+      queued.add(candidate);
+      chain.push(candidate);
+    }
+  }
+  return chain;
 }
 
 class SynthAudio {
@@ -525,6 +566,10 @@ export class TankGame {
   private fps = 0;
   private fpsSampleStart = 0;
   private fpsSampleFrames = 0;
+  private diagnosticsTimer = 0;
+  private readonly activeEnemyScratch: EnemyTank[] = [];
+  private readonly playerProjectileScratch: Projectile[] = [];
+  private readonly enemyProjectileScratch: Projectile[] = [];
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -761,13 +806,17 @@ export class TankGame {
       }
     }
 
-    this.canvas.dataset.visualTheme = this.mission.visualTheme;
-    this.canvas.dataset.particleCount = String(this.particles.length);
-    this.canvas.dataset.trackCount = String(this.trackMarks.length);
-    this.canvas.dataset.decalCount = String(this.decals.length);
-    this.canvas.dataset.wreckCount = String(this.wrecks.length);
-    this.canvas.dataset.ejectedTurretCount = String(this.ejectedTurrets.length);
-    this.canvas.dataset.fps = String(this.fps);
+    this.diagnosticsTimer -= delta;
+    if (this.diagnosticsTimer <= 0) {
+      this.diagnosticsTimer = 0.25;
+      this.canvas.dataset.visualTheme = this.mission.visualTheme;
+      this.canvas.dataset.particleCount = String(this.particles.length);
+      this.canvas.dataset.trackCount = String(this.trackMarks.length);
+      this.canvas.dataset.decalCount = String(this.decals.length);
+      this.canvas.dataset.wreckCount = String(this.wrecks.length);
+      this.canvas.dataset.ejectedTurretCount = String(this.ejectedTurrets.length);
+      this.canvas.dataset.fps = String(this.fps);
+    }
     this.renderer.render({
       phase: this.phase,
       mission: this.mission,
@@ -1059,20 +1108,25 @@ export class TankGame {
 
   private updateReinforcements(delta: number): void {
     if (this.reinforcementsRemaining <= 0 || !this.player.alive) return;
-    const activeEnemies = this.enemies.filter((enemy) => enemy.alive);
     this.reinforcementTimer -= delta;
-    if (activeEnemies.length === 0) {
+    const activeEnemyCount = this.countActiveEnemies();
+    if (activeEnemyCount === 0) {
       this.reinforcementTimer = Math.min(this.reinforcementTimer, 0.9);
     }
     if (this.reinforcementTimer > 0) return;
     const maxConcurrent = this.mode === "survival"
       ? Math.min(14, 4 + this.wave)
       : this.mission.reinforcements.maxConcurrent;
-    if (activeEnemies.length >= maxConcurrent) {
+    if (activeEnemyCount >= maxConcurrent) {
       this.reinforcementTimer = 0.7;
       return;
     }
 
+    const activeEnemies = this.activeEnemyScratch;
+    activeEnemies.length = 0;
+    for (const enemy of this.enemies) {
+      if (enemy.alive) activeEnemies.push(enemy);
+    }
     const entry = findReinforcementEntry(
       this.mission,
       this.player,
@@ -1106,10 +1160,18 @@ export class TankGame {
     this.publishSnapshot();
   }
 
-  private getEnemiesLeft(): number {
-    if (this.mode === "survival") return this.enemies.filter((enemy) => enemy.alive).length;
-    return this.reinforcementsRemaining
-      + this.enemies.filter((enemy) => enemy.alive).length;
+  private getEnemiesLeft(activeEnemies = this.countActiveEnemies()): number {
+    return this.mode === "survival"
+      ? activeEnemies
+      : this.reinforcementsRemaining + activeEnemies;
+  }
+
+  private countActiveEnemies(): number {
+    let count = 0;
+    for (const enemy of this.enemies) {
+      if (enemy.alive) count += 1;
+    }
+    return count;
   }
 
   private pickSurvivalEnemyKind(): Exclude<EnemyKind, "boss"> {
@@ -1130,13 +1192,15 @@ export class TankGame {
   }
 
   private collidesWithWalls(tank: Tank): boolean {
-    return this.mission.walls.some((wall) => (
-      pointInExpandedWall(tank, wall, tank.radius + TANK_WALL_PADDING)
-    )) || this.hazards.some((hazard) => (
-      hazard.active
+    for (const wall of this.mission.walls) {
+      if (pointInExpandedWall(tank, wall, tank.radius + TANK_WALL_PADDING)) return true;
+    }
+    for (const hazard of this.hazards) {
+      if (hazard.active
         && hazard.kind === "barricade"
-        && distanceSquared(tank, hazard) < (tank.radius + hazard.radius) ** 2
-    ));
+        && distanceSquared(tank, hazard) < (tank.radius + hazard.radius) ** 2) return true;
+    }
+    return false;
   }
 
   private tryPlayerShoot(): void {
@@ -1388,7 +1452,7 @@ export class TankGame {
   }
 
   private updateProjectiles(delta: number): void {
-    const moved: Projectile[] = [];
+    let movedCount = 0;
     for (const projectile of this.projectiles) {
       projectile.life -= delta;
       if (projectile.life <= 0) {
@@ -1488,20 +1552,23 @@ export class TankGame {
 
       projectile.x = nextX;
       projectile.y = nextY;
-      moved.push(projectile);
+      this.projectiles[movedCount] = projectile;
+      movedCount += 1;
     }
+    this.projectiles.length = movedCount;
 
-    const intercepted = this.resolveProjectileInterceptions(moved);
-    const remaining: Projectile[] = [];
-    for (const projectile of moved) {
+    const intercepted = this.resolveProjectileInterceptions(this.projectiles);
+    let remainingCount = 0;
+    for (const projectile of this.projectiles) {
       if (intercepted.has(projectile)) continue;
       if (this.projectileHitsObjective(projectile)) continue;
       if (this.projectileHitsMine(projectile)) continue;
       if (this.projectileHitsHazard(projectile)) continue;
       if (this.projectileHitsTank(projectile)) continue;
-      remaining.push(projectile);
+      this.projectiles[remainingCount] = projectile;
+      remainingCount += 1;
     }
-    this.projectiles = remaining;
+    this.projectiles.length = remainingCount;
   }
 
   private resolveProjectileInterceptions(projectiles: Projectile[]): Set<Projectile> {
@@ -1510,10 +1577,16 @@ export class TankGame {
       second: Projectile;
       interception: ProjectileInterception;
     }> = [];
-    for (let firstIndex = 0; firstIndex < projectiles.length; firstIndex += 1) {
-      const first = projectiles[firstIndex];
-      for (let secondIndex = firstIndex + 1; secondIndex < projectiles.length; secondIndex += 1) {
-        const second = projectiles[secondIndex];
+    const playerProjectiles = this.playerProjectileScratch;
+    const enemyProjectiles = this.enemyProjectileScratch;
+    playerProjectiles.length = 0;
+    enemyProjectiles.length = 0;
+    for (const projectile of projectiles) {
+      if (projectile.ignoresProjectiles) continue;
+      (projectile.owner === "player" ? playerProjectiles : enemyProjectiles).push(projectile);
+    }
+    for (const first of playerProjectiles) {
+      for (const second of enemyProjectiles) {
         const interception = findProjectileInterception(first, second);
         if (interception) collisions.push({ first, second, interception });
       }
@@ -1545,10 +1618,47 @@ export class TankGame {
         direction + Math.PI,
         "spark",
       );
+      this.applyProjectileInterceptionBlast(
+        collision.interception,
+        getProjectileInterceptionBlastRadius(collision.first, collision.second),
+      );
       this.shake = Math.max(this.shake, 0.75);
     }
     if (intercepted.size > 0) this.audio.impact();
     return intercepted;
+  }
+
+  private applyProjectileInterceptionBlast(interception: Point, blastRadius: number): void {
+    this.spawnExplosion(
+      interception.x,
+      interception.y,
+      Math.max(18, blastRadius * 0.34),
+      "#fff0b4",
+    );
+    if (
+      this.player.alive
+      && this.player.invulnerable <= 0
+      && isPointInsideProjectileInterceptionBlast(this.player, interception, blastRadius)
+    ) {
+      this.damagePlayer(
+        PROJECTILE_INTERCEPTION_DAMAGE,
+        Math.atan2(interception.y - this.player.y, interception.x - this.player.x),
+      );
+    }
+    for (const enemy of this.enemies) {
+      if (
+        !enemy.alive
+        || !isPointInsideProjectileInterceptionBlast(enemy, interception, blastRadius)
+      ) continue;
+      if (
+        enemy.kind === "boss"
+        && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
+      ) continue;
+      enemy.hp -= PROJECTILE_INTERCEPTION_DAMAGE;
+      enemy.damageFlash = 0.12;
+      enemy.lastHitDirection = Math.atan2(interception.y - enemy.y, interception.x - enemy.x);
+      if (enemy.hp <= 0) this.destroyEnemy(enemy, 120);
+    }
   }
 
   private projectileHitsTank(projectile: Projectile): boolean {
@@ -1557,7 +1667,7 @@ export class TankGame {
       if (
         this.player.alive
         && this.player.invulnerable <= 0
-        && segmentDistanceSquared(projectile, { x: projectile.previousX, y: projectile.previousY }, this.player) <= radius * radius
+        && projectileSegmentDistanceSquared(projectile, this.player) <= radius * radius
       ) {
         this.damagePlayer(
           projectile.damage,
@@ -1572,7 +1682,7 @@ export class TankGame {
       if (!enemy.alive) continue;
       if (projectile.hitTankIds.includes(enemy.id)) continue;
       const radius = projectile.radius + enemy.radius;
-      if (segmentDistanceSquared(projectile, { x: projectile.previousX, y: projectile.previousY }, enemy) > radius * radius) continue;
+      if (projectileSegmentDistanceSquared(projectile, enemy) > radius * radius) continue;
       if (
         enemy.kind === "boss"
         && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
@@ -1604,12 +1714,18 @@ export class TankGame {
           return true;
         }
       }
-      const supportingTank = projectile.kind === "piercing" ? undefined : this.enemies.find((candidate) => (
-        candidate.alive
-          && candidate.kind === "support"
-          && candidate.id !== enemy.id
-          && distanceSquared(candidate, enemy) < 110 * 110
-      ));
+      let supportingTank: EnemyTank | undefined;
+      if (projectile.kind !== "piercing") {
+        for (const candidate of this.enemies) {
+          if (candidate.alive
+            && candidate.kind === "support"
+            && candidate.id !== enemy.id
+            && distanceSquared(candidate, enemy) < 110 * 110) {
+            supportingTank = candidate;
+            break;
+          }
+        }
+      }
       if (supportingTank) {
         supportingTank.hp -= 1;
         supportingTank.damageFlash = 0.12;
@@ -1694,11 +1810,7 @@ export class TankGame {
     for (const node of this.objectiveNodes) {
       if (!node.active || node.kind !== "relay") continue;
       const radius = node.radius + projectile.radius;
-      if (segmentDistanceSquared(
-        projectile,
-        { x: projectile.previousX, y: projectile.previousY },
-        node,
-      ) > radius * radius) continue;
+      if (projectileSegmentDistanceSquared(projectile, node) > radius * radius) continue;
       node.hp -= projectile.damage;
       this.hits += 1;
       if (projectile.ricocheted) this.ricochetHits += 1;
@@ -1718,15 +1830,11 @@ export class TankGame {
     const mineIndex = this.mines.findIndex((mine) => {
       if (mine.owner === projectile.owner) return false;
       const radius = mine.radius + projectile.radius;
-      return segmentDistanceSquared(
-        projectile,
-        { x: projectile.previousX, y: projectile.previousY },
-        mine,
-      ) <= radius * radius;
+      return projectileSegmentDistanceSquared(projectile, mine) <= radius * radius;
     });
     if (mineIndex < 0) return false;
     const [mine] = this.mines.splice(mineIndex, 1);
-    this.detonate(mine.x, mine.y, 82, projectile.owner);
+    this.detonateMineChain(mine, projectile.owner);
     this.score += projectile.owner === "player" ? 35 : 0;
     return true;
   }
@@ -1739,11 +1847,7 @@ export class TankGame {
         || (hazard.kind !== "barrel" && hazard.kind !== "barricade")
       ) continue;
       const radius = hazard.radius + projectile.radius;
-      if (segmentDistanceSquared(
-        projectile,
-        { x: projectile.previousX, y: projectile.previousY },
-        hazard,
-      ) > radius * radius) continue;
+      if (projectileSegmentDistanceSquared(projectile, hazard) > radius * radius) continue;
       hazard.active = false;
       if (hazard.kind === "barrel") {
         this.detonate(hazard.x, hazard.y, 96, "player");
@@ -1781,34 +1885,46 @@ export class TankGame {
   }
 
   private updateMines(delta: number): void {
-    const remaining: ProximityMine[] = [];
+    let remainingCount = 0;
+    const triggeredMines: ProximityMine[] = [];
     for (const mine of this.mines) {
       mine.armTime -= delta;
       mine.life -= delta;
       if (mine.life <= 0) continue;
       if (mine.armTime > 0) {
-        remaining.push(mine);
+        this.mines[remainingCount] = mine;
+        remainingCount += 1;
         continue;
       }
-      const targets = mine.owner === "player"
-        ? this.enemies.filter((enemy) => enemy.alive)
-        : this.player.alive ? [this.player] : [];
-      const target = targets.find((tank) => distanceSquared(tank, mine) < 52 * 52);
-      if (!target) {
-        remaining.push(mine);
+      let triggered = mine.owner === "enemy"
+        && this.player.alive
+        && distanceSquared(this.player, mine) < 52 * 52;
+      if (mine.owner === "player") {
+        for (const enemy of this.enemies) {
+          if (enemy.alive && distanceSquared(enemy, mine) < 52 * 52) {
+            triggered = true;
+            break;
+          }
+        }
+      }
+      if (!triggered) {
+        this.mines[remainingCount] = mine;
+        remainingCount += 1;
         continue;
       }
-      this.detonate(mine.x, mine.y, 82, mine.owner);
+      triggeredMines.push(mine);
     }
-    this.mines = remaining;
+    this.mines.length = remainingCount;
+    for (const mine of triggeredMines) this.detonateMineChain(mine, mine.owner);
   }
 
   private updateArtillery(delta: number): void {
-    const remaining: ArtilleryStrike[] = [];
+    let remainingCount = 0;
     for (const strike of this.artilleryStrikes) {
       strike.delay -= delta;
       if (strike.delay > 0) {
-        remaining.push(strike);
+        this.artilleryStrikes[remainingCount] = strike;
+        remainingCount += 1;
         continue;
       }
       if (distanceSquared(this.player, strike) < strike.radius * strike.radius) {
@@ -1818,7 +1934,7 @@ export class TankGame {
       this.addDecal("crater", strike.x, strike.y, strike.radius * 0.62);
       this.shake = Math.max(this.shake, 3);
     }
-    this.artilleryStrikes = remaining;
+    this.artilleryStrikes.length = remainingCount;
   }
 
   private updateTrackMarks(delta: number): void {
@@ -1845,12 +1961,12 @@ export class TankGame {
     if (tank.trackCooldown > 0) return;
     tank.trackCooldown = interval;
     const scale = tank.kind === "boss" ? 1.48 : tank.kind === "heavy" ? 1.18 : 1;
+    const forwardX = Math.cos(tank.hullAngle);
+    const forwardY = Math.sin(tank.hullAngle);
     for (const side of [-1, 1]) {
       pushCapped(this.trackMarks, {
-        x: tank.x - Math.cos(tank.hullAngle) * 12 * scale
-          + Math.cos(tank.hullAngle + Math.PI / 2) * side * 10 * scale,
-        y: tank.y - Math.sin(tank.hullAngle) * 12 * scale
-          + Math.sin(tank.hullAngle + Math.PI / 2) * side * 10 * scale,
+        x: tank.x - forwardX * 12 * scale - forwardY * side * 10 * scale,
+        y: tank.y - forwardY * 12 * scale + forwardX * side * 10 * scale,
         angle: tank.hullAngle,
         life: 1,
         maxLife: 1,
@@ -1974,6 +2090,18 @@ export class TankGame {
     }
   }
 
+  private detonateMineChain(
+    initialMine: ProximityMine,
+    owner: "player" | "enemy",
+  ): void {
+    const chain = collectMineChainReaction(initialMine, this.mines);
+    const detonated = new Set(chain);
+    this.mines = this.mines.filter((mine) => !detonated.has(mine));
+    for (const mine of chain) {
+      this.detonate(mine.x, mine.y, MINE_BLAST_RADIUS, owner);
+    }
+  }
+
   private damagePlayer(damage: number, hitDirection = this.player.hullAngle + Math.PI): void {
     const remainingDamage = absorbShieldDamage(this.activePowerUps, damage);
     if (remainingDamage < damage) {
@@ -2080,18 +2208,25 @@ export class TankGame {
   }
 
   private updateDecals(delta: number): void {
-    this.decals = this.decals.filter((decal) => {
-      if (decal.life === undefined) return true;
-      decal.life -= delta;
-      return decal.life > 0;
-    });
+    let remainingCount = 0;
+    for (const decal of this.decals) {
+      if (decal.life !== undefined) decal.life -= delta;
+      if (decal.life !== undefined && decal.life <= 0) continue;
+      this.decals[remainingCount] = decal;
+      remainingCount += 1;
+    }
+    this.decals.length = remainingCount;
   }
 
   private updateWrecks(delta: number): void {
-    this.wrecks = this.wrecks.filter((wreck) => {
+    let remainingCount = 0;
+    for (const wreck of this.wrecks) {
       wreck.life -= delta;
-      return wreck.life > 0;
-    });
+      if (wreck.life <= 0) continue;
+      this.wrecks[remainingCount] = wreck;
+      remainingCount += 1;
+    }
+    this.wrecks.length = remainingCount;
   }
 
   private ejectTurret(tank: Tank): void {
@@ -2125,14 +2260,19 @@ export class TankGame {
   }
 
   private updateEjectedTurrets(delta: number): void {
-    this.ejectedTurrets = this.ejectedTurrets.filter((turret) => {
+    let remainingCount = 0;
+    for (const turret of this.ejectedTurrets) {
       updateEjectedTurret(turret, delta);
-      return !turret.landed || turret.life > 0;
-    });
+      if (turret.landed && turret.life <= 0) continue;
+      this.ejectedTurrets[remainingCount] = turret;
+      remainingCount += 1;
+    }
+    this.ejectedTurrets.length = remainingCount;
   }
 
   private updateTankVisualStates(delta: number): void {
-    for (const tank of [this.player, ...this.enemies]) {
+    for (let tankIndex = -1; tankIndex < this.enemies.length; tankIndex += 1) {
+      const tank = tankIndex < 0 ? this.player : this.enemies[tankIndex];
       tank.stunned = Math.max(0, tank.stunned - delta);
       tank.recoilTime = Math.max(0, tank.recoilTime - delta);
       tank.chassisKick = Math.max(0, tank.chassisKick - delta * 14);
@@ -2179,9 +2319,10 @@ export class TankGame {
   }
 
   private updateParticles(delta: number): void {
-    this.particles = this.particles.filter((particle) => {
+    let remainingCount = 0;
+    for (const particle of this.particles) {
       particle.life -= delta;
-      if (particle.life <= 0) return false;
+      if (particle.life <= 0) continue;
       particle.x += particle.velocityX * delta;
       particle.y += particle.velocityY * delta;
       if (particle.kind === "smoke") particle.size += delta * 7;
@@ -2189,8 +2330,10 @@ export class TankGame {
       const damping = Math.exp(-(particle.kind === "smoke" ? 1.35 : 4.5) * delta);
       particle.velocityX *= damping;
       particle.velocityY *= damping;
-      return true;
-    });
+      this.particles[remainingCount] = particle;
+      remainingCount += 1;
+    }
+    this.particles.length = remainingCount;
   }
 
   private spawnMuzzleParticles(x: number, y: number, angle: number, color: string): void {
@@ -2346,8 +2489,8 @@ export class TankGame {
   private publishSnapshot(): void {
     const boss = this.enemies.find((enemy) => enemy.kind === "boss" && enemy.alive);
     const totalEnemies = getMissionEnemyTotal(this.mission);
-    const activeEnemies = this.enemies.filter((enemy) => enemy.alive).length;
-    const enemiesLeft = this.getEnemiesLeft();
+    const activeEnemies = this.countActiveEnemies();
+    const enemiesLeft = this.getEnemiesLeft(activeEnemies);
     const objective = this.getObjectiveProgress();
     const tankDefinition = PLAYER_TANKS[this.playerTank];
     this.onSnapshot({

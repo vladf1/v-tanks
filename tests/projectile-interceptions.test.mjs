@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PROJECTILE_INTERCEPTION_BLAST_RADIUS,
+  PROJECTILE_INTERCEPTION_DAMAGE,
   PROJECTILE_INTERCEPTION_PADDING,
   findProjectileInterception,
+  getProjectileInterceptionBlastRadius,
+  isPointInsideProjectileInterceptionBlast,
 } from "../src/game/engine.ts";
 
 function projectile({
@@ -65,4 +69,28 @@ test("piercing rounds pass through incoming projectiles", () => {
   piercing.ignoresProjectiles = true;
   const enemy = projectile({ owner: "enemy", previousX: 120, x: 80 });
   assert.equal(findProjectileInterception(piercing, enemy), null);
+});
+
+test("intercepted projectiles damage tanks inside the blast radius", () => {
+  const first = projectile({ owner: "player", previousX: 80, x: 120 });
+  const second = projectile({ owner: "enemy", previousX: 120, x: 80 });
+  first.explosionRadius = 0;
+  second.explosionRadius = 0;
+  const interception = findProjectileInterception(first, second);
+  assert.ok(interception);
+  const blastRadius = getProjectileInterceptionBlastRadius(first, second);
+
+  assert.equal(PROJECTILE_INTERCEPTION_DAMAGE, 1);
+  assert.equal(blastRadius, PROJECTILE_INTERCEPTION_BLAST_RADIUS);
+  assert.equal(isPointInsideProjectileInterceptionBlast({ x: 100, y: 125 }, interception, blastRadius), true);
+  assert.equal(isPointInsideProjectileInterceptionBlast({ x: 100, y: 145 }, interception, blastRadius), false);
+});
+
+test("an intercepted explosive shell retains its larger splash radius", () => {
+  const standard = projectile({ owner: "player", previousX: 80, x: 120 });
+  const explosive = projectile({ owner: "enemy", previousX: 120, x: 80 });
+  standard.explosionRadius = 0;
+  explosive.explosionRadius = 78;
+
+  assert.equal(getProjectileInterceptionBlastRadius(standard, explosive), 78);
 });
