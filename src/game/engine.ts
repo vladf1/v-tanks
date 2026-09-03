@@ -1819,7 +1819,7 @@ export class TankGame {
         node.active = false;
         this.score += 400;
         this.shake = Math.max(this.shake, 2.5);
-        this.spawnExplosion(node.x, node.y, 34, "#7bdcff");
+        this.spawnExplosion(node.x, node.y, 34, "#7bdcff", undefined, "relay-wreck");
       }
       return true;
     }
@@ -2419,6 +2419,7 @@ export class TankGame {
     size: number,
     color: string,
     decalLife?: number,
+    decalKind?: Decal["kind"],
   ): void {
     this.addParticle({
       kind: "flash",
@@ -2466,12 +2467,13 @@ export class TankGame {
       });
     }
     if (size >= 18) {
+      const resolvedDecalKind = decalKind ?? (size >= 30 ? "crater" : "scorch");
       this.addDecal(
-        size >= 30 ? "crater" : "scorch",
+        resolvedDecalKind,
         x,
         y,
         size * 0.8,
-        undefined,
+        resolvedDecalKind === "relay-wreck" ? color : undefined,
         Math.random() * TAU,
         decalLife,
       );

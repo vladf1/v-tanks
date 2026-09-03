@@ -719,7 +719,7 @@
       });
 
       const decalKinds = [
-        "scorch", "crater", "mine-crater", "wall-chip", "oil",
+        "scorch", "crater", "mine-crater", "relay-wreck", "wall-chip", "oil",
         "rubble", "grate", "warning", "cable", "casings",
       ];
       decalKinds.forEach((kind, index) => {
@@ -729,6 +729,7 @@
           wreckLinked ? "Wreck-linked fade" : "Persistent decal",
           "obstacle",
         );
+        if (kind === "relay-wreck") card.figure.id = "relay-wreck-preview";
         historyRoot.append(card.figure);
         const context = prepareCanvas(card.canvas, 120, 60, 3);
         GameRenderer.renderDecalPreview(context, {
@@ -737,9 +738,11 @@
           x: 60,
           y: 30,
           angle: 0.18,
-          size: kind === "cable" ? 22 : 13,
+          size: kind === "cable" ? 22 : kind === "relay-wreck" ? 24 : 13,
           opacity: kind === "oil" ? 0.9 : 0.72,
-          color: kind === "oil"
+          color: kind === "relay-wreck"
+            ? "#7bdcff"
+            : kind === "oil"
             ? VISUAL_THEMES.industrial.decalPalette[1]
             : VISUAL_THEMES.industrial.decalPalette[index % 4],
           life: wreckLinked ? 8 : undefined,

@@ -25,6 +25,7 @@ export type DecalKind =
   | "scorch"
   | "crater"
   | "mine-crater"
+  | "relay-wreck"
   | "wall-chip"
   | "oil"
   | "rubble"

@@ -233,6 +233,25 @@ test("mines use angular bodies and leave no oval mine craters", async () => {
   assert.doesNotMatch(mineCrater, /ellipse\(/);
 });
 
+test("destroyed relays leave angular electronic wreckage instead of an oval crater", async () => {
+  const rendererSource = await readFile(
+    new URL("../src/game/renderer.ts", import.meta.url),
+    "utf8",
+  );
+  const start = rendererSource.indexOf('decal.kind === "relay-wreck"');
+  const end = rendererSource.indexOf('decal.kind === "wall-chip"', start);
+  const relayWreck = rendererSource.slice(start, end);
+  assert.match(relayWreck, /traceOilBlob/);
+  assert.match(relayWreck, /bezierCurveTo/);
+  assert.doesNotMatch(relayWreck, /ellipse\(/);
+
+  const engineSource = await readFile(
+    new URL("../src/game/engine.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(engineSource, /spawnExplosion\(node\.x, node\.y, 34, "#7bdcff", undefined, "relay-wreck"\)/);
+});
+
 test("mud hazards use irregular terrain shapes instead of an oval", async () => {
   const rendererSource = await readFile(
     new URL("../src/game/renderer.ts", import.meta.url),

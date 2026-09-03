@@ -709,7 +709,8 @@ export class GameRenderer {
     context.translate(decal.x, decal.y);
     context.rotate(decal.angle);
     const fade = decal.life === undefined ? 1 : getWreckOpacity(decal.life);
-    context.globalAlpha = decal.opacity * fade;
+    const baseAlpha = decal.opacity * fade;
+    context.globalAlpha = baseAlpha;
     context.fillStyle = decal.color;
     context.strokeStyle = decal.color;
     if (decal.kind === "oil") {
@@ -806,6 +807,87 @@ export class GameRenderer {
         context.translate(Math.cos(angle) * distance, Math.sin(angle) * distance);
         context.rotate(angle + noise(blastSeed + index * 67));
         context.fillRect(-fragmentSize, -fragmentSize * 0.45, fragmentSize * 2, fragmentSize * 0.9);
+        context.restore();
+      }
+    } else if (decal.kind === "relay-wreck") {
+      const wreckSeed = decal.id * 83 + Math.round(decal.x) * 3 + Math.round(decal.y) * 7;
+      context.globalAlpha = baseAlpha * 0.62;
+      context.fillStyle = "#020504";
+      traceOilBlob(
+        context,
+        decal,
+        331,
+        0,
+        2,
+        decal.size * 0.86,
+        decal.size * 0.58,
+        11,
+      );
+      context.fill();
+
+      context.globalAlpha = Math.min(1, baseAlpha * 1.5);
+      context.strokeStyle = decal.color;
+      context.lineWidth = 1.6;
+      for (let index = 0; index < 8; index += 1) {
+        if (index === 2 || index === 6) continue;
+        const angle = Math.PI / 8 + index * Math.PI / 4;
+        const nextAngle = Math.PI / 8 + (index + 1) * Math.PI / 4;
+        context.beginPath();
+        context.moveTo(Math.cos(angle) * decal.size * 0.58, Math.sin(angle) * decal.size * 0.58);
+        context.lineTo(Math.cos(nextAngle) * decal.size * 0.58, Math.sin(nextAngle) * decal.size * 0.58);
+        context.stroke();
+      }
+
+      context.save();
+      context.rotate(0.42);
+      context.fillStyle = "#09110f";
+      context.strokeStyle = "rgba(123, 220, 255, 0.62)";
+      context.lineWidth = 1.2;
+      context.fillRect(-7, -7, 14, 14);
+      context.strokeRect(-7, -7, 14, 14);
+      context.beginPath();
+      context.moveTo(-7, 2);
+      context.lineTo(-1, -2);
+      context.lineTo(2, 7);
+      context.stroke();
+      context.restore();
+
+      context.strokeStyle = "rgba(123, 220, 255, 0.48)";
+      context.lineWidth = 1.1;
+      for (let index = 0; index < 3; index += 1) {
+        const angle = noise(wreckSeed + index * 29) * TAU;
+        const endX = Math.cos(angle) * decal.size * (0.72 + index * 0.08);
+        const endY = Math.sin(angle) * decal.size * (0.58 + index * 0.07);
+        context.beginPath();
+        context.moveTo(Math.cos(angle) * 8, Math.sin(angle) * 8);
+        context.bezierCurveTo(
+          endX * 0.35,
+          endY * 0.12,
+          endX * 0.68,
+          endY * 1.08,
+          endX,
+          endY,
+        );
+        context.stroke();
+      }
+
+      for (let index = 0; index < 7; index += 1) {
+        const angle = noise(wreckSeed + index * 41) * TAU;
+        const distance = decal.size * (0.48 + noise(wreckSeed + index * 47) * 0.52);
+        const shardSize = 2.8 + noise(wreckSeed + index * 53) * 3.4;
+        context.save();
+        context.translate(Math.cos(angle) * distance, Math.sin(angle) * distance * 0.76);
+        context.rotate(angle + noise(wreckSeed + index * 59));
+        context.fillStyle = index % 3 === 0 ? "#526864" : "#202a27";
+        context.strokeStyle = index < 2 ? decal.color : "#66736f";
+        context.lineWidth = 0.9;
+        context.beginPath();
+        context.moveTo(-shardSize, -shardSize * 0.42);
+        context.lineTo(shardSize, -shardSize * 0.18);
+        context.lineTo(shardSize * 0.3, shardSize * 0.72);
+        context.closePath();
+        context.fill();
+        context.stroke();
         context.restore();
       }
     } else if (decal.kind === "wall-chip" || decal.kind === "casings") {
