@@ -1,12 +1,12 @@
 import { TankGame, type GamePhase, type GameSnapshot } from "./engine.ts";
 import { getMissionEnemyTotal, MISSIONS } from "./levels.ts";
 import { GameRenderer } from "./renderer.ts";
-import { POWER_UP_DEFINITIONS } from "./powerups.ts";
+import { POWER_UP_DEFINITIONS, TIMED_POWER_UP_KINDS } from "./powerups.ts";
 import {
   PLAYER_TANKS,
   type PlayerTankKind,
 } from "./loadouts.ts";
-import { AMMO_DEFINITIONS, type AmmoKind } from "./ammunition.ts";
+import { AMMO_DEFINITIONS, AMMO_KINDS } from "./ammunition.ts";
 import {
   bestRecord,
   readCampaignSave,
@@ -137,12 +137,16 @@ function requiredElement<T extends Element>(root: ParentNode, selector: string):
   return element;
 }
 
+function setText(element: Element, value: string): void {
+  if (element.textContent !== value) element.textContent = value;
+}
+
 export class VTanks {
   private readonly root: HTMLElement;
   private readonly shell: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly game: TankGame;
-  private phase: GamePhase = "menu";
+  private get phase(): GamePhase { return this.snapshot.phase; }
   private snapshot = INITIAL_SNAPSHOT;
   private save: CampaignSave = readCampaignSave();
   private unlockedMission = Math.min(MISSIONS.length - 1, this.save.unlockedMission);
@@ -150,24 +154,25 @@ export class VTanks {
   private soundEnabled = this.save.settings.sound;
   private recordedResultPhase: GamePhase | null = null;
   private renderedSelectedMapIndex = -1;
-  private renderedSelectedMapSize = "";
+  private readonly previewObserver: ResizeObserver;
 
   constructor(root: HTMLElement) {
     this.root = root;
     root.innerHTML = gameShell;
     requiredElement(root, ".mission-grid").innerHTML = missionCards();
-    this.renderMissionCardMaps();
     requiredElement(root, "[data-tank-classes]").innerHTML = tankClassButtons();
-    requiredElement(root, "[data-campaign-total]").textContent =
-      `/${MISSIONS.length.toString().padStart(2, "0")}`;
+    setText(requiredElement(root, "[data-campaign-total]"), `/${MISSIONS.length.toString().padStart(2, "0")}`);
     this.shell = requiredElement(root, ".game-shell");
     this.canvas = requiredElement(root, ".game-canvas");
     root.addEventListener("click", this.onClick);
+    this.createCombatReadouts();
+    this.previewObserver = new ResizeObserver(this.renderPreviews);
+    window.addEventListener("resize", this.renderPreviews);
+    this.previewObserver.observe(requiredElement(root, "[data-screen=menu]"));
 
     this.game = new TankGame(
       this.canvas,
       this.onSnapshot,
-      this.onPhase,
     );
     this.game.configure(this.save.tankClass);
     this.game.setSound(this.soundEnabled);
@@ -175,6 +180,8 @@ export class VTanks {
   }
 
   destroy(): void {
+    this.previewObserver.disconnect();
+    window.removeEventListener("resize", this.renderPreviews);
     this.game.destroy();
     this.root.removeEventListener("click", this.onClick);
     this.root.replaceChildren();
@@ -208,11 +215,6 @@ export class VTanks {
       writeCampaignSave(this.save);
     }
     this.recordedResultPhase = snapshot.phase;
-    this.render();
-  };
-
-  private readonly onPhase = (phase: GamePhase): void => {
-    this.phase = phase;
     this.render();
   };
 
@@ -258,7 +260,7 @@ export class VTanks {
     if (action === "deploy") this.startMission(this.selectedMission);
     if (action === "survival") this.startSurvival();
     if (action === "restart" || action === "replay" || action === "redeploy") {
-      this.startMission(this.snapshot.missionIndex);
+      this.game.restart();
     }
     if (action === "next") this.startMission(this.snapshot.missionIndex + 1);
   };
@@ -301,6 +303,13 @@ export class VTanks {
     return { context, width, height };
   }
 
+  private readonly renderPreviews = (): void => {
+    if (this.phase !== "menu") return;
+    this.renderMissionCardMaps();
+    this.renderedSelectedMapIndex = -1;
+    this.renderSelectedMissionMap(this.selectedMission);
+  };
+
   private renderMissionCardMaps(): void {
     this.root.querySelectorAll<HTMLCanvasElement>("[data-mission-map]").forEach((canvas) => {
       const index = Number.parseInt(canvas.dataset.missionMap ?? "", 10);
@@ -329,12 +338,7 @@ export class VTanks {
 
   private renderSelectedMissionMap(missionIndex: number): void {
     const canvas = requiredElement<HTMLCanvasElement>(this.root, "[data-selected-map]");
-    const rect = canvas.getBoundingClientRect();
-    const sizeKey = `${Math.round(rect.width)}x${Math.round(rect.height)}@${window.devicePixelRatio || 1}`;
-    if (
-      this.renderedSelectedMapIndex === missionIndex
-      && this.renderedSelectedMapSize === sizeKey
-    ) return;
+    if (this.renderedSelectedMapIndex === missionIndex) return;
     const prepared = this.preparePreviewCanvas(canvas);
     if (!prepared) return;
     GameRenderer.renderMinimapPreview(
@@ -345,119 +349,110 @@ export class VTanks {
       0.24,
     );
     this.renderedSelectedMapIndex = missionIndex;
-    this.renderedSelectedMapSize = sizeKey;
+  }
+
+  private createCombatReadouts(): void {
+    requiredElement(this.root, ".armor-pips").innerHTML =
+      "<i></i>".repeat(Math.max(...Object.values(PLAYER_TANKS).map((tank) => tank.hp)));
+    requiredElement(this.root, "[data-ammunition]").innerHTML = AMMO_KINDS.map((kind, index) => `
+      <div class="ammo-chip" data-ammo-kind="${kind}" style="--ammo-color:${AMMO_DEFINITIONS[kind].color}">
+        <b>${index + 1}</b><span>${AMMO_DEFINITIONS[kind].shortLabel}</span><strong></strong>
+      </div>`).join("");
+    requiredElement(this.root, "[data-active-powerups]").innerHTML = TIMED_POWER_UP_KINDS.map((kind) => `
+      <div class="powerup-chip" data-powerup-kind="${kind}" style="--powerup-color:${POWER_UP_DEFINITIONS[kind].color}" hidden>
+        <span>${POWER_UP_DEFINITIONS[kind].shortLabel}</span><strong></strong><i><b></b></i>
+      </div>`).join("");
   }
 
   private render(): void {
-    const currentMission = MISSIONS[this.snapshot.missionIndex];
-    const selected = MISSIONS[this.selectedMission];
     const playing = this.phase === "playing";
+    const phaseClass = `game-shell phase-${this.phase}`;
+    if (this.shell.className !== phaseClass) {
+      this.shell.className = phaseClass;
+      this.root.querySelectorAll<HTMLElement>("[data-screen]").forEach((screen) => {
+        screen.hidden = screen.dataset.screen !== this.phase;
+      });
+      this.root.querySelectorAll<HTMLElement>("[data-combat]").forEach((element) => {
+        element.hidden = !playing;
+      });
+      requiredElement<HTMLElement>(this.root, "[data-playing-chrome]").hidden = this.phase === "menu";
+      requiredElement<HTMLButtonElement>(this.root, '[data-action="pause"]').hidden = !playing;
+    }
+    const soundButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="sound"]');
+    const soundLabel = this.soundEnabled ? "Mute sound" : "Enable sound";
+    setText(soundButton, this.soundEnabled ? ")))" : "×");
+    soundButton.ariaLabel = soundLabel;
+    soundButton.title = soundLabel;
+    if (this.phase === "menu") this.renderMenu();
+    else if (playing) this.renderCombat();
+    else this.renderResult();
+  }
 
+  private renderCombat(): void {
+    const currentMission = MISSIONS[this.snapshot.missionIndex];
     this.canvas.dataset.shotsFired = String(this.snapshot.shots);
     this.canvas.dataset.activeEnemies = String(this.snapshot.activeEnemies);
-    this.shell.className = `game-shell phase-${this.phase}`;
-    this.root.querySelectorAll<HTMLElement>("[data-screen]").forEach((screen) => {
-      screen.hidden = screen.dataset.screen !== this.phase;
-    });
-    this.root.querySelectorAll<HTMLElement>("[data-combat]").forEach((element) => {
-      element.hidden = !playing;
-    });
-
-    requiredElement<HTMLElement>(this.root, "[data-playing-chrome]").hidden = this.phase === "menu";
-    requiredElement<HTMLButtonElement>(this.root, '[data-action="pause"]').hidden = !playing;
-    requiredElement(this.root, "[data-current-mission]").textContent =
-      `${currentMission.number} / ${currentMission.name}`;
-    requiredElement(this.root, "[data-targets]").textContent =
-      this.snapshot.mode === "survival"
+    setText(requiredElement(this.root, "[data-current-mission]"), `${currentMission.number} / ${currentMission.name}`);
+    setText(requiredElement(this.root, "[data-targets]"), this.snapshot.mode === "survival"
         ? `WAVE ${this.snapshot.wave}`
-        : `${this.snapshot.enemiesLeft} / ${this.snapshot.totalEnemies}`;
+        : `${this.snapshot.enemiesLeft} / ${this.snapshot.totalEnemies}`);
     requiredElement<HTMLElement>(this.root, "[data-objective-readout]").hidden =
       this.snapshot.mode === "campaign" && currentMission.objective.kind === "eliminate";
-    requiredElement(this.root, "[data-mission-completion]").textContent =
-      this.snapshot.objectiveDetail;
-    requiredElement(this.root, "[data-objective-label]").textContent =
-      this.snapshot.objectiveLabel;
-    requiredElement(this.root, "[data-time]").textContent = formatTime(this.snapshot.elapsed);
-    requiredElement(this.root, "[data-fps-value]").textContent =
-      this.snapshot.fps > 0 ? String(this.snapshot.fps) : "--";
+    setText(requiredElement(this.root, "[data-mission-completion]"), this.snapshot.objectiveDetail);
+    setText(requiredElement(this.root, "[data-objective-label]"), this.snapshot.objectiveLabel);
+    setText(requiredElement(this.root, "[data-time]"), formatTime(this.snapshot.elapsed));
+    setText(requiredElement(this.root, "[data-fps-value]"), this.snapshot.fps > 0 ? String(this.snapshot.fps) : "--");
 
     const missionTip = getMissionTip(currentMission, this.snapshot);
     const missionTipElement = requiredElement<HTMLElement>(this.root, ".mission-tip");
     missionTipElement.classList.toggle("boss-active", this.snapshot.bossHealth !== null);
-    requiredElement(this.root, "[data-tip-title]").textContent = missionTip.title;
-    requiredElement(this.root, "[data-tip-copy]").textContent = missionTip.copy;
+    setText(requiredElement(this.root, "[data-tip-title]"), missionTip.title);
+    setText(requiredElement(this.root, "[data-tip-copy]"), missionTip.copy);
     const secondaryTip = requiredElement<HTMLElement>(this.root, "[data-tip-secondary]");
-    secondaryTip.textContent = missionTip.secondary;
+    setText(secondaryTip, missionTip.secondary);
     secondaryTip.hidden = !missionTip.secondary;
 
-    const soundButton = requiredElement<HTMLButtonElement>(this.root, '[data-action="sound"]');
-    const soundLabel = this.soundEnabled ? "Mute sound" : "Enable sound";
-    soundButton.textContent = this.soundEnabled ? ")))" : "×";
-    soundButton.ariaLabel = soundLabel;
-    soundButton.title = soundLabel;
-    const armorPips = requiredElement<HTMLElement>(this.root, ".armor-pips");
-    armorPips.replaceChildren(...Array.from({ length: this.snapshot.maxHealth }, (_, index) => {
-      const pip = document.createElement("i");
+    const armorPips = requiredElement(this.root, ".armor-pips");
+    Array.from(armorPips.children).forEach((pip, index) => {
+      (pip as HTMLElement).hidden = index >= this.snapshot.maxHealth;
       pip.classList.toggle("active", index < this.snapshot.health);
-      return pip;
-    }));
+    });
     requiredElement<HTMLElement>(this.root, "[data-ability-charge]").style.width =
       `${this.snapshot.abilityReady * 100}%`;
-    requiredElement(this.root, "[data-ability-label]").textContent = this.snapshot.abilityLabel;
-    requiredElement(this.root, "[data-ability-status]").textContent =
-      this.save.tankClass === "sapper"
+    setText(requiredElement(this.root, "[data-ability-label]"), this.snapshot.abilityLabel);
+    setText(requiredElement(this.root, "[data-ability-status]"), this.save.tankClass === "sapper"
         ? `${this.snapshot.abilityCharges} MINES`
-        : this.snapshot.abilityReady >= 1 ? "READY" : "CHARGING";
+        : this.snapshot.abilityReady >= 1 ? "READY" : "CHARGING");
     const boss = requiredElement<HTMLElement>(this.root, "[data-boss]");
-    boss.hidden = !playing || this.snapshot.bossHealth === null;
+    boss.hidden = this.snapshot.bossHealth === null;
     requiredElement<HTMLElement>(this.root, "[data-boss-health]").style.width =
       `${(this.snapshot.bossHealth ?? 0) * 100}%`;
-    requiredElement(this.root, "[data-boss-phase]").textContent =
-      this.snapshot.bossPhase ? ` / PHASE ${this.snapshot.bossPhase}` : "";
-    requiredElement(this.root, "[data-bonus-status]").textContent =
-      `${this.snapshot.bonusComplete ? "✓" : "○"} ${this.snapshot.bonusLabel}`;
-    const ammunition = requiredElement<HTMLElement>(this.root, "[data-ammunition]");
-    ammunition.replaceChildren(...this.snapshot.ammunition.map((ammo, index) => {
-      const definition = AMMO_DEFINITIONS[ammo.kind as AmmoKind];
-      const chip = document.createElement("div");
-      chip.className = "ammo-chip";
+    setText(requiredElement(this.root, "[data-boss-phase]"), this.snapshot.bossPhase ? ` / PHASE ${this.snapshot.bossPhase}` : "");
+    setText(requiredElement(this.root, "[data-bonus-status]"), `${this.snapshot.bonusComplete ? "✓" : "○"} ${this.snapshot.bonusLabel}`);
+    this.snapshot.ammunition.forEach((ammo) => {
+      const chip = requiredElement(this.root, `[data-ammo-kind="${ammo.kind}"]`);
       chip.classList.toggle("selected", ammo.kind === this.snapshot.selectedAmmo);
       chip.classList.toggle("empty", ammo.count === 0);
-      chip.style.setProperty("--ammo-color", definition.color);
-      const key = document.createElement("b");
-      key.textContent = String(index + 1);
-      const label = document.createElement("span");
-      label.textContent = definition.shortLabel;
-      const count = document.createElement("strong");
-      count.textContent = ammo.count === null ? "∞" : String(ammo.count);
-      chip.append(key, label, count);
-      return chip;
-    }));
-
-    const powerUpReadout = requiredElement<HTMLElement>(this.root, "[data-powerup-readout]");
-    powerUpReadout.hidden = !playing || this.snapshot.activePowerUps.length === 0;
-    const activePowerUps = requiredElement<HTMLElement>(this.root, "[data-active-powerups]");
-    activePowerUps.replaceChildren(...this.snapshot.activePowerUps.map((active) => {
-      const definition = POWER_UP_DEFINITIONS[active.kind];
-      const item = document.createElement("div");
-      item.className = "powerup-chip";
-      item.style.setProperty("--powerup-color", definition.color);
-      const label = document.createElement("span");
-      label.textContent = definition.shortLabel;
-      const time = document.createElement("strong");
-      time.textContent = active.kind === "shield"
+      setText(requiredElement(chip, "strong"), ammo.count === null ? "∞" : String(ammo.count));
+    });
+    requiredElement<HTMLElement>(this.root, "[data-powerup-readout]").hidden =
+      this.snapshot.activePowerUps.length === 0;
+    for (const kind of TIMED_POWER_UP_KINDS) {
+      const chip = requiredElement<HTMLElement>(this.root, `[data-powerup-kind="${kind}"]`);
+      const active = this.snapshot.activePowerUps.find((powerUp) => powerUp.kind === kind);
+      chip.hidden = !active;
+      if (!active) continue;
+      setText(requiredElement(chip, "strong"), kind === "shield"
         ? `${active.shieldPoints} SH / ${Math.ceil(active.remaining)}s`
-        : `${Math.ceil(active.remaining)}s`;
-      const track = document.createElement("i");
-      const fill = document.createElement("b");
-      fill.style.width = `${(active.remaining / active.duration) * 100}%`;
-      track.append(fill);
-      item.append(label, time, track);
-      return item;
-    }));
+        : `${Math.ceil(active.remaining)}s`);
+      requiredElement<HTMLElement>(chip, "b").style.width =
+        `${(active.remaining / active.duration) * 100}%`;
+    }
+  }
 
-    requiredElement(this.root, "[data-campaign-progress]").textContent =
-      String(this.unlockedMission + 1);
+  private renderMenu(): void {
+    const selected = MISSIONS[this.selectedMission];
+    setText(requiredElement(this.root, "[data-campaign-progress]"), String(this.unlockedMission + 1));
     this.root.querySelectorAll<HTMLButtonElement>("[data-mission-index]").forEach((button, index) => {
       const locked = index > this.unlockedMission;
       button.disabled = locked;
@@ -468,44 +463,46 @@ export class VTanks {
       const medal = requiredElement<HTMLElement>(button, "[data-medal]");
       const record = this.save.records[String(index)];
       medal.hidden = !record;
-      medal.textContent = record ? `${record.rank}${record.bonus ? "★" : ""}` : "";
+      setText(medal, record ? `${record.rank}${record.bonus ? "★" : ""}` : "");
     });
-    requiredElement(this.root, "[data-selected-number]").textContent = selected.number;
-    requiredElement(this.root, "[data-selected-name]").textContent = selected.name;
-    requiredElement(this.root, "[data-selected-briefing]").textContent = selected.briefing;
-    requiredElement(this.root, "[data-selected-hostiles]").textContent =
-      String(getMissionEnemyTotal(selected));
-    requiredElement(this.root, "[data-selected-par]").textContent = formatTime(selected.parTime);
-    requiredElement(this.root, "[data-selected-threat]").textContent = selected.threat;
-    requiredElement(this.root, "[data-selected-objective]").textContent = selected.objective.label;
-    requiredElement(this.root, "[data-selected-bonus]").textContent = selected.bonus.label;
+    setText(requiredElement(this.root, "[data-selected-number]"), selected.number);
+    setText(requiredElement(this.root, "[data-selected-name]"), selected.name);
+    setText(requiredElement(this.root, "[data-selected-briefing]"), selected.briefing);
+    setText(requiredElement(this.root, "[data-selected-hostiles]"), String(getMissionEnemyTotal(selected)));
+    setText(requiredElement(this.root, "[data-selected-par]"), formatTime(selected.parTime));
+    setText(requiredElement(this.root, "[data-selected-threat]"), selected.threat);
+    setText(requiredElement(this.root, "[data-selected-objective]"), selected.objective.label);
+    setText(requiredElement(this.root, "[data-selected-bonus]"), selected.bonus.label);
     this.renderSelectedMissionMap(this.selectedMission);
 
     this.root.querySelectorAll<HTMLButtonElement>("[data-tank-class]").forEach((button) => {
       button.classList.toggle("selected", this.save.tankClass === button.dataset.tankClass);
     });
-    requiredElement(this.root, "[data-survival-best]").textContent =
-      this.save.survivalBest.toLocaleString();
+    setText(requiredElement(this.root, "[data-survival-best]"), this.save.survivalBest.toLocaleString());
 
-    requiredElement(this.root, "[data-paused-eyebrow]").textContent =
-      `MISSION ${currentMission.number}`;
-    requiredElement(this.root, "[data-victory-title]").textContent =
-      `RANK ${getRating(this.snapshot)}`;
-    requiredElement(this.root, "[data-victory-mission]").textContent = currentMission.name;
-    requiredElement(this.root, "[data-result-time]").textContent = formatTime(this.snapshot.elapsed);
-    requiredElement(this.root, "[data-result-par]").textContent = formatTime(currentMission.parTime);
-    requiredElement(this.root, "[data-result-accuracy]").textContent = `${accuracy(this.snapshot)}%`;
-    requiredElement(this.root, "[data-result-hull]").textContent =
-      `${this.snapshot.health}/${this.snapshot.maxHealth}`;
+  }
 
-    const finalMission = this.snapshot.missionIndex === MISSIONS.length - 1;
-    requiredElement<HTMLButtonElement>(this.root, '[data-action="next"]').hidden = finalMission;
-    requiredElement<HTMLButtonElement>(this.root, "[data-campaign-complete]").hidden = !finalMission;
+  private renderResult(): void {
+    const currentMission = MISSIONS[this.snapshot.missionIndex];
+    setText(requiredElement(this.root, "[data-paused-eyebrow]"), `MISSION ${currentMission.number}`);
+    if (this.phase === "paused") return;
+    if (this.phase === "victory") {
+      setText(requiredElement(this.root, "[data-victory-title]"), `RANK ${getRating(this.snapshot)}`);
+      setText(requiredElement(this.root, "[data-victory-mission]"), currentMission.name);
+      setText(requiredElement(this.root, "[data-result-time]"), formatTime(this.snapshot.elapsed));
+      setText(requiredElement(this.root, "[data-result-par]"), formatTime(currentMission.parTime));
+      setText(requiredElement(this.root, "[data-result-accuracy]"), `${accuracy(this.snapshot)}%`);
+      setText(requiredElement(this.root, "[data-result-hull]"), `${this.snapshot.health}/${this.snapshot.maxHealth}`);
 
+      const finalMission = this.snapshot.missionIndex === MISSIONS.length - 1;
+      requiredElement<HTMLButtonElement>(this.root, '[data-action="next"]').hidden = finalMission;
+      requiredElement<HTMLButtonElement>(this.root, "[data-campaign-complete]").hidden = !finalMission;
+
+      return;
+    }
     const units = this.snapshot.enemiesLeft === 1 ? "tank" : "tanks";
-    requiredElement(this.root, "[data-defeat-message]").textContent =
-      this.snapshot.mode === "survival"
+    setText(requiredElement(this.root, "[data-defeat-message]"), this.snapshot.mode === "survival"
         ? `Wave ${this.snapshot.wave} reached with ${this.snapshot.score.toLocaleString()} points.`
-        : `The operation still has ${this.snapshot.enemiesLeft} hostile ${units} remaining.`;
+        : `The operation still has ${this.snapshot.enemiesLeft} hostile ${units} remaining.`);
   }
 }

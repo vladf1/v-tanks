@@ -1,3 +1,4 @@
+import { distanceSquared, pointInExpandedWall } from "./geometry.ts";
 import {
   STANDARD_TANK_RADIUS,
   TANK_WALL_PADDING,
@@ -16,23 +17,6 @@ const ENTRY_INSET = 24;
 const PLAYER_CLEARANCE = 360;
 const TANK_CLEARANCE = 24;
 const RANDOM_ATTEMPTS = 48;
-
-function distanceSquared(a: Point, b: Point): number {
-  const deltaX = a.x - b.x;
-  const deltaY = a.y - b.y;
-  return (deltaX * deltaX) + (deltaY * deltaY);
-}
-
-function pointInExpandedWall(
-  point: Point,
-  wall: Mission["walls"][number],
-  expansion: number,
-): boolean {
-  return point.x >= wall.x - expansion
-    && point.x <= wall.x + wall.width + expansion
-    && point.y >= wall.y - expansion
-    && point.y <= wall.y + wall.height + expansion;
-}
 
 function randomEdgePoint(random: () => number): Point {
   const horizontalSpan = WORLD_WIDTH - (ENTRY_INSET * 2);

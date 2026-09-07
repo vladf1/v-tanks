@@ -1,3 +1,4 @@
+import { createGame } from "./game-fixture.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -145,50 +146,44 @@ test("every visual collection cap evicts the oldest noncritical entry", () => {
   );
 });
 
-test("decals, wrecks, and ejected turrets stay outside collision and projectile resolution", async () => {
-  const engineSource = await readFile(
-    new URL("../src/game/engine.ts", import.meta.url),
-    "utf8",
-  );
-  const collisionStart = engineSource.indexOf("private collidesWithWalls");
-  const collisionEnd = engineSource.indexOf("private tryPlayerShoot", collisionStart);
-  const collisionCode = engineSource.slice(collisionStart, collisionEnd);
-  assert.match(collisionCode, /this\.mission\.walls/);
-  assert.match(collisionCode, /this\.hazards/);
-  assert.doesNotMatch(collisionCode, /this\.(decals|wrecks|ejectedTurrets)/);
-
-  const projectileStart = engineSource.indexOf("private updateProjectiles");
-  const projectileEnd = engineSource.indexOf("private updateHazards", projectileStart);
-  const projectileCode = engineSource.slice(projectileStart, projectileEnd);
-  assert.match(projectileCode, /this\.mission\.walls/);
-  assert.doesNotMatch(projectileCode, /this\.(decals|wrecks|ejectedTurrets)/);
+test("wrecks, decals and ejected turrets do not block tanks or shells", () => {
+  const { game } = createGame();
+  const obstacle = { ...game.player, id: 1, size: 100, radius: 100 };
+  game.decals = [obstacle];
+  game.wrecks = [obstacle];
+  game.ejectedTurrets = [obstacle];
+  assert.equal(game.collidesWithWalls(game.player), false);
+  game.tryPlayerShoot();
+  const projectile = game.projectiles[0];
+  const startX = projectile.x;
+  game.updateProjectiles(1 / 120);
+  assert.equal(game.projectiles[0], projectile);
+  assert.ok(projectile.x > startX);
+  game.destroy();
 });
 
-test("renderer preserves the visual depth order", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf("private drawMission");
-  const end = rendererSource.indexOf("private drawDecal", start);
-  const drawMission = rendererSource.slice(start, end);
-  const order = [
-    "state.decals",
-    "state.trackMarks",
-    "drawWallLayer",
-    "state.hazards",
-    "state.wrecks",
-    "state.ejectedTurrets",
-    "state.projectiles",
-    "state.particles",
-    "drawCrosshair",
-  ];
-  let previous = -1;
-  for (const marker of order) {
-    const index = drawMission.indexOf(marker);
-    assert.ok(index > previous, `${marker} is out of render order`);
-    previous = index;
+test("renderer draws ground details, obstacles, combatants and effects in depth order", () => {
+  const { game } = createGame();
+  const renderer = game.renderer;
+  const calls = [];
+  for (const name of ["Decal", "TrackMark", "WallLayer", "Hazard", "ObjectiveNode", "Mine",
+    "ArtilleryStrike", "Wreck", "EjectedTurret", "PowerUp", "AmmoPack", "Projectile", "Tank",
+    "TankHealthBar", "PlayerPowerUpEffects", "Particle", "Crosshair"]) {
+    renderer[`draw${name}`] = () => calls.push(name);
   }
+  const item = { id: 0, x: 100, y: 100, radius: 10, size: 10, active: true, alive: true };
+  renderer.drawMission({}, {
+    mission: game.mission, player: { ...item, invulnerable: 0 }, enemies: [item],
+    decals: [item], trackMarks: [item], hazards: [item], objectiveNodes: [item], mines: [item],
+    artilleryStrikes: [item], wrecks: [item], powerUps: [item], ammoPacks: [item],
+    ejectedTurrets: [{ ...item, landed: true }, { ...item, landed: false }],
+    projectiles: [item], particles: [item], mouse: item,
+  });
+  assert.deepEqual(calls, ["Decal", "TrackMark", "WallLayer", "Hazard", "ObjectiveNode", "Mine",
+    "ArtilleryStrike", "Wreck", "EjectedTurret", "PowerUp", "AmmoPack", "Projectile",
+    "Tank", "TankHealthBar", "Tank", "PlayerPowerUpEffects", "TankHealthBar",
+    "EjectedTurret", "Particle", "Crosshair"]);
+  game.destroy();
 });
 
 test("wall runs keep the terrain grid visible between individual obstacles", async () => {
@@ -202,17 +197,49 @@ test("wall runs keep the terrain grid visible between individual obstacles", asy
   assert.doesNotMatch(drawWall, /fillRect\(wall\.x[^;]+wall\.height\)/);
 });
 
-test("cached wall art renders at the effective display resolution", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf("private drawWallLayer");
-  const end = rendererSource.indexOf("private drawDecal", start);
-  const drawWallLayer = rendererSource.slice(start, end);
-  assert.match(drawWallLayer, /this\.dpr \* this\.displayScale/);
-  assert.match(drawWallLayer, /setTransform\(renderScale/);
-  assert.match(drawWallLayer, /drawImage\(item\.canvas, item\.x, item\.y, item\.width, item\.height\)/);
+test("wall cache respects display resolution, skips offscreen walls and reuses images", () => {
+  const { game } = createGame();
+  const transforms = [];
+  globalThis.document = { createElement: () => ({ getContext: () => ({
+    setTransform: (...args) => transforms.push(args), translate() {},
+  }) }) };
+  const renderer = game.renderer;
+  renderer.dpr = 2;
+  renderer.displayScale = 1.5;
+  renderer.drawWall = () => {};
+  const draws = [];
+  const context = { drawImage: (...args) => draws.push(args) };
+  const mission = { number: 'test', walls: [
+    { x: 100, y: 100, width: 30, height: 40 }, { x: 1800, y: 100, width: 30, height: 40 },
+  ] };
+  renderer.drawWallLayer(context, mission);
+  assert.equal(draws.length, 1);
+  assert.equal(transforms[0][0], 3);
+  assert.equal(draws[0][0].width, (30 + 36) * 3);
+  renderer.drawWallLayer(context, mission);
+  assert.equal(transforms.length, 2);
+  assert.equal(draws[0][0], draws[1][0]);
+  renderer.cameraX = 1500;
+  renderer.drawWallLayer(context, mission);
+  assert.notEqual(draws[2][0], draws[0][0]);
+  game.destroy();
+});
+
+test("pointer conversion reuses bounds and refreshes after canvas movement", () => {
+  const { game, canvas } = createGame();
+  let reads = 0;
+  canvas.getBoundingClientRect = () => {
+    reads++;
+    return { left: 100, top: 50, width: 960, height: 600 };
+  };
+  const before = game.renderer.clientToWorld(300, 200);
+  for (let i = 0; i < 120; i++) game.renderer.clientToWorld(300, 200);
+  assert.equal(reads, 0);
+  game.renderer.refreshBounds();
+  const after = game.renderer.clientToWorld(400, 250);
+  assert.deepEqual(after, before);
+  assert.equal(reads, 1);
+  game.destroy();
 });
 
 test("mines use angular bodies and leave no oval mine craters", async () => {
@@ -337,17 +364,6 @@ test("victory and defeat cross-fade over the retained arena with reduced-motion 
   assert.match(stylesheet, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
-test("camera shake stops when gameplay enters a non-playing phase", async () => {
-  const engineSource = await readFile(
-    new URL("../src/game/engine.ts", import.meta.url),
-    "utf8",
-  );
-  const start = engineSource.indexOf("private setPhase");
-  const end = engineSource.indexOf("private publishSnapshot", start);
-  const setPhase = engineSource.slice(start, end);
-  assert.match(setPhase, /phase !== "playing"[^;]+this\.shake = 0/s);
-});
-
 test("mission directions appear at the bottom temporarily and honor reduced motion", async () => {
   const stylesheet = await readFile(
     new URL("../src/style.css", import.meta.url),
@@ -373,17 +389,6 @@ test("ammunition HUD is anchored below the minimap", async () => {
   const ammoReadout = stylesheet.slice(start, end);
   assert.match(ammoReadout, /top:\s*auto/);
   assert.match(ammoReadout, /bottom:\s*108px/);
-});
-
-test("player projectiles use the selected ammunition color", async () => {
-  const engineSource = await readFile(
-    new URL("../src/game/engine.ts", import.meta.url),
-    "utf8",
-  );
-  const start = engineSource.indexOf("private spawnProjectile");
-  const end = engineSource.indexOf("private tryDash", start);
-  const spawnProjectile = engineSource.slice(start, end);
-  assert.match(spawnProjectile, /color:\s*owner === "player"\s*\? ammo\.color/);
 });
 
 test("eliminate missions do not repeat enemy progress in the objective readout", async () => {

@@ -245,7 +245,7 @@
 
       const simulationTimes = [];
       for (let sample = 0; sample < 5; sample += 1) {
-        const game = new TankGame(document.querySelector("#simulation"), () => {}, () => {});
+        const game = new TankGame(document.querySelector("#simulation"), () => {});
         game.setSound(false);
         game.startMission(MISSIONS.indexOf(mission));
         game.player.hp = 1_000_000;

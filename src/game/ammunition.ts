@@ -1,10 +1,5 @@
-import {
-  TANK_WALL_PADDING,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
-  type Mission,
-  type Point,
-} from "./levels.ts";
+import type { Mission, Point } from "./levels.ts";
+import { placePickups } from "./pickups.ts";
 
 export const AMMO_KINDS = ["basic", "piercing", "explosive", "emp"] as const;
 export type AmmoKind = typeof AMMO_KINDS[number];
@@ -102,9 +97,6 @@ export interface AmmoSnapshot {
 }
 
 export const AMMO_PACK_RADIUS = 16;
-const EDGE_PADDING = 64;
-const SPAWN_CLEARANCE = 96;
-const PACK_CLEARANCE = 92;
 
 export function createAmmoInventory(): AmmoInventory {
   return { basic: Number.POSITIVE_INFINITY, piercing: 0, explosive: 0, emp: 0 };
@@ -137,46 +129,12 @@ export function cycleAmmo(
   return "basic";
 }
 
-function distanceSquared(first: Point, second: Point): number {
-  const x = first.x - second.x;
-  const y = first.y - second.y;
-  return x * x + y * y;
-}
-
-function isSafePackPosition(point: Point, mission: Mission, placed: AmmoPack[]): boolean {
-  const wallPadding = AMMO_PACK_RADIUS + TANK_WALL_PADDING + 10;
-  if (mission.walls.some((wall) => (
-    point.x >= wall.x - wallPadding
-      && point.x <= wall.x + wall.width + wallPadding
-      && point.y >= wall.y - wallPadding
-      && point.y <= wall.y + wall.height + wallPadding
-  ))) return false;
-  if ([mission.player, ...mission.enemies].some((spawn) => (
-    distanceSquared(point, spawn) < SPAWN_CLEARANCE * SPAWN_CLEARANCE
-  ))) return false;
-  return placed.every((pack) => distanceSquared(point, pack) >= PACK_CLEARANCE * PACK_CLEARANCE);
-}
-
 export function placeMissionAmmoPacks(
   mission: Mission,
-  random: () => number = Math.random,
+  random = Math.random,
+  occupied: readonly Point[] = [],
 ): AmmoPack[] {
-  const placed: AmmoPack[] = [];
-  const kinds = AMMO_KINDS.filter((kind): kind is Exclude<AmmoKind, "basic"> => kind !== "basic");
-  for (const [id, kind] of kinds.entries()) {
-    let position: Point | null = null;
-    for (let attempt = 0; attempt < 140; attempt += 1) {
-      const candidate = {
-        x: EDGE_PADDING + random() * (WORLD_WIDTH - EDGE_PADDING * 2),
-        y: EDGE_PADDING + random() * (WORLD_HEIGHT - EDGE_PADDING * 2),
-      };
-      if (isSafePackPosition(candidate, mission, placed)) {
-        position = candidate;
-        break;
-      }
-    }
-    if (!position) throw new Error(`Mission ${mission.number} has no safe ${kind} ammunition pack.`);
-    placed.push({ id, kind, ...position, radius: AMMO_PACK_RADIUS, active: true });
-  }
-  return placed;
+  return placePickups(mission, ["piercing", "explosive", "emp"] as const, {
+    radius: AMMO_PACK_RADIUS, edge: 64, spawnClearance: 96, pickupClearance: 92, wallGap: 10,
+  }, random, occupied);
 }

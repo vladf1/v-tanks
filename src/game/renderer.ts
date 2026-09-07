@@ -134,6 +134,8 @@ export class GameRenderer {
   private displayOffsetY = 0;
   private displayWidth = 1;
   private displayHeight = 1;
+  private canvasLeft = 0;
+  private canvasTop = 0;
   private dpr = 1;
   private cameraX = 0;
   private cameraY = 0;
@@ -158,6 +160,8 @@ export class GameRenderer {
     this.context = context;
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);
+    window.addEventListener("scroll", this.refreshBounds, true);
+    window.addEventListener("resize", this.refreshBounds);
     this.resize();
   }
 
@@ -344,14 +348,17 @@ export class GameRenderer {
 
   destroy(): void {
     this.resizeObserver.disconnect();
+    window.removeEventListener("scroll", this.refreshBounds, true);
+    window.removeEventListener("resize", this.refreshBounds);
   }
 
+  private readonly refreshBounds = (): void => this.resize();
+
   clientToWorld(clientX: number, clientY: number, focus?: Point): Point {
-    const rect = this.canvas.getBoundingClientRect();
     const camera = focus ? getCameraPosition(focus) : { x: this.cameraX, y: this.cameraY };
     return {
-      x: (clientX - rect.left - this.displayOffsetX) / this.displayScale + camera.x,
-      y: (clientY - rect.top - this.displayOffsetY) / this.displayScale + camera.y,
+      x: (clientX - this.canvasLeft - this.displayOffsetX) / this.displayScale + camera.x,
+      y: (clientY - this.canvasTop - this.displayOffsetY) / this.displayScale + camera.y,
     };
   }
 
@@ -395,6 +402,10 @@ export class GameRenderer {
 
   private resize(): void {
     const rect = this.canvas.getBoundingClientRect();
+    this.canvasLeft = rect.left;
+    this.canvasTop = rect.top;
+    if (this.displayWidth === rect.width && this.displayHeight === rect.height
+      && this.dpr === (window.devicePixelRatio || 1)) return;
     this.displayWidth = rect.width;
     this.displayHeight = rect.height;
     this.dpr = window.devicePixelRatio || 1;
@@ -700,6 +711,8 @@ export class GameRenderer {
       this.wallLayer = { key, items };
     }
     for (const item of items) {
+      if (item.x + item.width < this.cameraX - 8 || item.x > this.cameraX + VIEW_WIDTH + 8
+        || item.y + item.height < this.cameraY - 8 || item.y > this.cameraY + VIEW_HEIGHT + 8) continue;
       context.drawImage(item.canvas, item.x, item.y, item.width, item.height);
     }
   }

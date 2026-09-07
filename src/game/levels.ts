@@ -1,3 +1,4 @@
+import { distanceSquared, pointInExpandedWall } from "./geometry.ts";
 export type EnemyKind =
   | "scout"
   | "guard"
@@ -149,12 +150,6 @@ const BONUS_KINDS: BonusKind[] = [
   "hull",
 ];
 
-function distanceSquared(first: Point, second: Point): number {
-  const deltaX = first.x - second.x;
-  const deltaY = first.y - second.y;
-  return (deltaX * deltaX) + (deltaY * deltaY);
-}
-
 function findFeaturePositions(
   mission: Pick<Mission, "player" | "enemies" | "walls">,
   count: number,
@@ -174,7 +169,7 @@ function findFeaturePositions(
 
   const placed: Point[] = [];
   for (const candidate of candidates) {
-    if (mission.walls.some((wall) => isPointInExpandedWall(candidate, wall, 62))) continue;
+    if (mission.walls.some((wall) => pointInExpandedWall(candidate, wall, 62))) continue;
     if ([mission.player, ...mission.enemies].some((spawn) => (
       distanceSquared(candidate, spawn) < 150 * 150
     ))) continue;
@@ -350,13 +345,6 @@ export interface SpawnOverlap {
   wallIndex: number;
 }
 
-function isPointInExpandedWall(point: Point, wall: Wall, expansion: number): boolean {
-  return point.x >= wall.x - expansion
-    && point.x <= wall.x + wall.width + expansion
-    && point.y >= wall.y - expansion
-    && point.y <= wall.y + wall.height + expansion;
-}
-
 export function findMissionSpawnOverlaps(mission: Mission): SpawnOverlap[] {
   const units = [
     { label: "player", radius: STANDARD_TANK_RADIUS, point: mission.player },
@@ -368,7 +356,7 @@ export function findMissionSpawnOverlaps(mission: Mission): SpawnOverlap[] {
   ];
 
   return units.flatMap((unit) => mission.walls.flatMap((wall, wallIndex) => (
-    isPointInExpandedWall(unit.point, wall, unit.radius + TANK_WALL_PADDING)
+    pointInExpandedWall(unit.point, wall, unit.radius + TANK_WALL_PADDING)
       ? [{ unit: unit.label, wallIndex }]
       : []
   )));

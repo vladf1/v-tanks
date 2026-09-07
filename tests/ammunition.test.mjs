@@ -1,3 +1,4 @@
+import { placeMissionPowerUps } from "../src/game/powerups.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -78,4 +79,15 @@ test("mine blasts propagate through nearby mines", () => {
     collectMineChainReaction(initial, [adjacent, chained, distant]).map(({ id }) => id),
     [1, 2, 3],
   );
+});
+
+test("pickup fallback finds room even when random attempts repeat, without overlapping power-ups", () => {
+  for (const mission of MISSIONS) {
+    const powerUps = placeMissionPowerUps(mission, () => 0.5);
+    const packs = placeMissionAmmoPacks(mission, () => 0.5, powerUps);
+    assert.equal(packs.length, 3);
+    for (const pack of packs) for (const other of [...powerUps, ...packs]) {
+      if (other !== pack) assert.ok(Math.hypot(pack.x - other.x, pack.y - other.y) >= 92);
+    }
+  }
 });

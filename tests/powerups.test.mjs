@@ -1,3 +1,6 @@
+import { AMMO_DEFINITIONS } from "../src/game/ammunition.ts";
+import { createGame } from "./game-fixture.mjs";
+import { PLAYER_TANKS, getCannonStats } from "../src/game/loadouts.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MISSIONS, WORLD_HEIGHT, WORLD_WIDTH } from "../src/game/levels.ts";
@@ -8,8 +11,6 @@ import {
   activateTimedPowerUp,
   createActivePowerUps,
   getActivePowerUpSnapshots,
-  getPlayerReloadTime,
-  getPlayerShellStats,
   getPlayerSpeedMultiplier,
   placeMissionPowerUps,
   tickActivePowerUps,
@@ -54,21 +55,15 @@ test("power-up positions change with the mission random seed", () => {
 test("timed power-ups apply their documented player modifiers and expire", () => {
   const active = createActivePowerUps();
   assert.equal(getPlayerSpeedMultiplier(active), 1);
-  assert.equal(getPlayerReloadTime(active), 0.3);
-  assert.deepEqual(getPlayerShellStats(active), { bounces: 1, damage: 1 });
 
   activateTimedPowerUp(active, "speed");
   activateTimedPowerUp(active, "gun");
   activateTimedPowerUp(active, "ricochet");
   assert.equal(getPlayerSpeedMultiplier(active), 1.5);
-  assert.equal(getPlayerReloadTime(active), 0.15);
-  assert.deepEqual(getPlayerShellStats(active), { bounces: 3, damage: 2 });
   assert.equal(getActivePowerUpSnapshots(active).length, 3);
 
   tickActivePowerUps(active, POWER_UP_DEFINITIONS.speed.duration);
   assert.equal(getPlayerSpeedMultiplier(active), 1);
-  assert.equal(getPlayerReloadTime(active), 0.3);
-  assert.deepEqual(getPlayerShellStats(active), { bounces: 1, damage: 1 });
   assert.deepEqual(getActivePowerUpSnapshots(active), []);
 });
 
@@ -81,4 +76,31 @@ test("shield absorbs three damage before hull damage passes through", () => {
   assert.equal(absorbShieldDamage(active, 3), 1);
   assert.equal(active.shieldPoints, 0);
   assert.equal(active.shield, 0);
+});
+
+test("class cannons apply gun and ricochet upgrades in actual firing", () => {
+  const { game } = createGame();
+  for (const [kind, definition] of Object.entries(PLAYER_TANKS)) {
+    game.configure(kind);
+    game.startMission(0);
+    const cannon = getCannonStats(definition.loadout.cannon);
+    game.tryPlayerShoot();
+    assert.equal(game.player.cooldown, cannon.reload);
+    assert.equal(game.projectiles.at(-1).color, AMMO_DEFINITIONS.basic.color);
+    assert.equal(game.projectiles.at(-1).damage, cannon.damage);
+    assert.equal(game.projectiles.at(-1).bounces, cannon.bounces);
+    activateTimedPowerUp(game.activePowerUps, "gun");
+    activateTimedPowerUp(game.activePowerUps, "ricochet");
+    game.player.cooldown = 0;
+    game.tryPlayerShoot();
+    assert.equal(game.player.cooldown, cannon.reload * 0.5);
+    assert.equal(game.projectiles.at(-1).damage, cannon.damage * 2);
+    assert.equal(game.projectiles.at(-1).bounces, cannon.bounces + 2);
+    tickActivePowerUps(game.activePowerUps, 12);
+    game.player.cooldown = 0;
+    game.tryPlayerShoot();
+    assert.equal(game.projectiles.at(-1).damage, cannon.damage);
+    assert.equal(game.projectiles.at(-1).bounces, cannon.bounces);
+  }
+  game.destroy();
 });

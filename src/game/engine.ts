@@ -1,3 +1,4 @@
+import { distanceSquared, pointInExpandedWall } from "./geometry.ts";
 import {
   BOSS_TANK_RADIUS,
   findMissionSpawnOverlaps,
@@ -236,12 +237,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function distanceSquared(a: Point, b: Point): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return (dx * dx) + (dy * dy);
-}
-
 function normalizeAngle(angle: number): number {
   let result = angle;
   while (result > Math.PI) result -= TAU;
@@ -264,13 +259,6 @@ function createSeededRandom(seed: number): () => number {
     state = ((state * 1664525) + 1013904223) >>> 0;
     return state / 0x1_0000_0000;
   };
-}
-
-function pointInExpandedWall(point: Point, wall: Wall, expansion: number): boolean {
-  return point.x >= wall.x - expansion
-    && point.x <= wall.x + wall.width + expansion
-    && point.y >= wall.y - expansion
-    && point.y <= wall.y + wall.height + expansion;
 }
 
 function segmentIntersectsWall(from: Point, to: Point, wall: Wall, padding = 0): boolean {
@@ -516,7 +504,6 @@ export class TankGame {
   private readonly keys = new Set<string>();
   private readonly audio = new SynthAudio();
   private readonly onSnapshot: (snapshot: GameSnapshot) => void;
-  private readonly onPhase: (phase: GamePhase) => void;
   private animationFrame = 0;
   private previousFrame = 0;
   private mission = MISSIONS[0];
@@ -561,6 +548,7 @@ export class TankGame {
   private wave = 1;
   private utilityCharges = 0;
   private shake = 0;
+  private survivalSeed = 0;
   private survivalRandom: () => number = Math.random;
   private hitStop = 0;
   private fps = 0;
@@ -574,12 +562,10 @@ export class TankGame {
   constructor(
     canvas: HTMLCanvasElement,
     onSnapshot: (snapshot: GameSnapshot) => void,
-    onPhase: (phase: GamePhase) => void,
   ) {
     this.canvas = canvas;
     this.renderer = new GameRenderer(canvas);
     this.onSnapshot = onSnapshot;
-    this.onPhase = onPhase;
     this.bindEvents();
     this.animationFrame = requestAnimationFrame(this.frame);
   }
@@ -602,9 +588,7 @@ export class TankGame {
 
   showMenu(): void {
     this.primaryFireHeld = false;
-    this.phase = "menu";
-    this.onPhase(this.phase);
-    this.publishSnapshot();
+    this.setPhase("menu");
   }
 
   startMission(index: number): void {
@@ -627,15 +611,9 @@ export class TankGame {
     this.reinforcementsRemaining = this.mission.reinforcements.count;
     this.reinforcementTimer = getReinforcementDelay(this.mission);
     this.powerUps = placeMissionPowerUps(this.mission);
-    this.ammoPacks = placeMissionAmmoPacks(this.mission);
-    this.ammunition = createAmmoInventory();
-    this.selectedAmmo = "basic";
-    this.activePowerUps = createActivePowerUps();
-    this.primaryFireHeld = false;
+    this.ammoPacks = placeMissionAmmoPacks(this.mission, Math.random, this.powerUps);
     this.mouse = { x: this.player.x + 180, y: this.player.y };
-    this.phase = "playing";
-    this.onPhase(this.phase);
-    this.publishSnapshot();
+    this.setPhase("playing", true);
   }
 
   startSurvival(seed: number): void {
@@ -643,6 +621,7 @@ export class TankGame {
     this.missionIndex = Math.min(7, MISSIONS.length - 1);
     this.mission = MISSIONS[this.missionIndex];
     this.resetOperationState();
+    this.survivalSeed = seed;
     this.survivalRandom = createSeededRandom(seed);
     this.player = this.createPlayer({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 });
     this.nextEnemyId = 0;
@@ -650,17 +629,24 @@ export class TankGame {
     this.reinforcementsRemaining = Number.MAX_SAFE_INTEGER;
     this.reinforcementTimer = 1;
     this.powerUps = placeMissionPowerUps(this.mission, this.survivalRandom);
-    this.ammoPacks = placeMissionAmmoPacks(this.mission, this.survivalRandom);
-    this.ammunition = createAmmoInventory();
-    this.selectedAmmo = "basic";
-    this.activePowerUps = createActivePowerUps();
+    this.ammoPacks = placeMissionAmmoPacks(this.mission, this.survivalRandom, this.powerUps);
     this.mouse = { x: this.player.x + 180, y: this.player.y };
-    this.phase = "playing";
-    this.onPhase(this.phase);
-    this.publishSnapshot();
+    this.setPhase("playing", true);
+  }
+
+  restart(): void {
+    if (this.mode === "survival") this.startSurvival(this.survivalSeed);
+    else this.startMission(this.missionIndex);
   }
 
   private resetOperationState(): void {
+    this.ammunition = createAmmoInventory();
+    this.selectedAmmo = "basic";
+    this.activePowerUps = createActivePowerUps();
+    this.primaryFireHeld = false;
+    this.keys.clear();
+    this.hitStop = 0;
+    this.snapshotTimer = 0.08;
     this.projectiles = [];
     this.particles = [];
     this.mines = createMinefieldMines(this.mission.hazards);
@@ -704,17 +690,13 @@ export class TankGame {
   pause(): void {
     if (this.phase !== "playing") return;
     this.primaryFireHeld = false;
-    this.phase = "paused";
-    this.onPhase(this.phase);
-    this.publishSnapshot();
+    this.setPhase("paused");
   }
 
   resume(): void {
     if (this.phase !== "paused") return;
-    this.phase = "playing";
     this.previousFrame = performance.now();
-    this.onPhase(this.phase);
-    this.publishSnapshot();
+    this.setPhase("playing");
   }
 
   private createPlayer(position: Point): Tank {
@@ -797,7 +779,10 @@ export class TankGame {
       } else {
         const steps = Math.max(1, Math.ceil(delta / (1 / 120)));
         const step = delta / steps;
-        for (let index = 0; index < steps; index += 1) this.update(step);
+        for (let index = 0; index < steps && this.phase === "playing"; index += 1) {
+          this.update(step);
+          if (this.hitStop > 0) break;
+        }
       }
     } else {
       this.updateParticles(delta);
@@ -897,7 +882,7 @@ export class TankGame {
       else if (this.phase === "paused") this.resume();
     }
     if (key === "r" && ["playing", "paused", "defeat", "victory"].includes(this.phase)) {
-      this.startMission(this.missionIndex);
+      this.restart();
     }
     if (key === "shift" || key === "e") this.trySecondaryAction();
     const ammoIndex = Number.parseInt(key, 10) - 1;
@@ -955,6 +940,7 @@ export class TankGame {
   };
 
   private update(delta: number): void {
+    if (this.phase !== "playing") return;
     this.elapsed += delta;
     this.snapshotTimer -= delta;
     this.player.cooldown = Math.max(0, this.player.cooldown - delta);
@@ -972,6 +958,12 @@ export class TankGame {
     this.updateHazards(delta);
     this.updateMines(delta);
     this.updateArtillery(delta);
+    // Wrecks own dead tank visuals; retain only live combatants between steps.
+    let aliveCount = 0;
+    for (const enemy of this.enemies) {
+      if (enemy.alive) this.enemies[aliveCount++] = enemy;
+    }
+    this.enemies.length = aliveCount;
     this.updateTrackMarks(delta);
     this.updateDecals(delta);
     this.updateWrecks(delta);
@@ -980,17 +972,21 @@ export class TankGame {
     this.updateObjective(delta);
     this.updateParticles(delta);
 
+    if (this.mode === "survival") this.wave = 1 + Math.floor(this.elapsed / 30);
+    if (!this.player.alive) {
+      this.setPhase("defeat");
+      return;
+    }
     if (this.isObjectiveComplete()) {
       this.clearTimer += delta;
-      if (this.clearTimer >= 1.05 && this.mode === "campaign") this.setPhase("victory");
+      if (this.clearTimer >= 1.05 && this.mode === "campaign") {
+        this.setPhase("victory");
+        return;
+      }
     } else {
       this.clearTimer = 0;
     }
 
-    if (this.mode === "survival") {
-      this.wave = 1 + Math.floor(this.elapsed / 30);
-    }
-    if (!this.player.alive) this.setPhase("defeat");
     if (this.snapshotTimer <= 0) {
       this.snapshotTimer = 0.08;
       this.publishSnapshot();
@@ -1635,11 +1631,7 @@ export class TankGame {
       Math.max(18, blastRadius * 0.34),
       "#fff0b4",
     );
-    if (
-      this.player.alive
-      && this.player.invulnerable <= 0
-      && isPointInsideProjectileInterceptionBlast(this.player, interception, blastRadius)
-    ) {
+    if (isPointInsideProjectileInterceptionBlast(this.player, interception, blastRadius)) {
       this.damagePlayer(
         PROJECTILE_INTERCEPTION_DAMAGE,
         Math.atan2(interception.y - this.player.y, interception.x - this.player.x),
@@ -1866,11 +1858,6 @@ export class TankGame {
       hazard.cooldown = Math.max(0, hazard.cooldown - delta);
       if (!hazard.active) continue;
       const playerDistance = distanceSquared(this.player, hazard);
-      if (hazard.kind === "minefield" && hazard.cooldown <= 0 && playerDistance < 48 * 48) {
-        hazard.cooldown = 2.5;
-        this.damagePlayer(1);
-        this.spawnExplosion(this.player.x, this.player.y, 20, "#ffb45f");
-      }
       if (
         hazard.kind === "repair-station"
         && this.player.hp < this.player.maxHp
@@ -2103,6 +2090,7 @@ export class TankGame {
   }
 
   private damagePlayer(damage: number, hitDirection = this.player.hullAngle + Math.PI): void {
+    if (!this.player.alive || this.player.invulnerable > 0) return;
     const remainingDamage = absorbShieldDamage(this.activePowerUps, damage);
     if (remainingDamage < damage) {
       this.player.invulnerable = 0.24;
@@ -2480,11 +2468,10 @@ export class TankGame {
     }
   }
 
-  private setPhase(phase: GamePhase): void {
-    if (this.phase === phase) return;
+  private setPhase(phase: GamePhase, force = false): void {
+    if (this.phase === phase && !force) return;
     if (phase !== "playing") this.shake = 0;
     this.phase = phase;
-    this.onPhase(phase);
     this.publishSnapshot();
   }
 

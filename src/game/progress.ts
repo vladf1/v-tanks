@@ -2,7 +2,6 @@ import {
   DEFAULT_PLAYER_TANK,
   inferPlayerTank,
   parsePlayerTank,
-  type Loadout,
   type PlayerTankKind,
 } from "./loadouts.ts";
 
@@ -33,10 +32,9 @@ const SAVE_KEY = "v-tanks-save-v2";
 const LEGACY_PROGRESS_KEY = "v-tanks-campaign-v1";
 
 export function createDefaultSave(): CampaignSave {
-  const legacy = Number.parseInt(localStorage.getItem(LEGACY_PROGRESS_KEY) ?? "0", 10);
   return {
     version: 3,
-    unlockedMission: Number.isFinite(legacy) ? Math.max(0, legacy) : 0,
+    unlockedMission: 0,
     records: {},
     tankClass: DEFAULT_PLAYER_TANK,
     survivalBest: 0,
@@ -49,21 +47,30 @@ export function createDefaultSave(): CampaignSave {
 export function readCampaignSave(): CampaignSave {
   const fallback = createDefaultSave();
   try {
-    const stored = JSON.parse(localStorage.getItem(SAVE_KEY) ?? "null") as (
-      Omit<Partial<CampaignSave>, "version"> & { version?: number; loadout?: Loadout }
-    ) | null;
+    const legacy = Number.parseInt(localStorage.getItem(LEGACY_PROGRESS_KEY) ?? "0", 10);
+    if (Number.isFinite(legacy)) fallback.unlockedMission = Math.max(0, legacy);
+    const stored = JSON.parse(localStorage.getItem(SAVE_KEY) ?? "null");
     if (!stored || (stored.version !== 2 && stored.version !== 3)) return fallback;
+    const records: Record<string, MissionRecord> = {};
+    for (const [key, record] of Object.entries(!Array.isArray(stored.records) ? stored.records ?? {} : {})) {
+      const value = record as MissionRecord | null;
+      if (!/^\d+$/.test(key) || !value || !["S", "A", "B"].includes(value.rank)
+        || ![value.time, value.accuracy, value.hull].every(isNonnegativeNumber)
+        || typeof value.bonus !== "boolean") continue;
+      records[key] = { rank: value.rank, time: value.time, accuracy: value.accuracy,
+        hull: value.hull, bonus: value.bonus };
+    }
     return {
-      ...fallback,
-      ...stored,
       version: 3,
-      unlockedMission: Math.max(0, stored.unlockedMission ?? fallback.unlockedMission),
-      records: stored.records ?? {},
+      unlockedMission: isNonnegativeNumber(stored.unlockedMission)
+        ? Math.floor(stored.unlockedMission) : fallback.unlockedMission,
+      records,
+      survivalBest: isNonnegativeNumber(stored.survivalBest) ? stored.survivalBest : 0,
       tankClass: stored.version === 2
         ? inferPlayerTank(stored.loadout)
         : parsePlayerTank(stored.tankClass),
       settings: {
-        sound: stored.settings?.sound ?? fallback.settings.sound,
+        sound: typeof stored.settings?.sound === "boolean" ? stored.settings.sound : true,
       },
     };
   } catch {
@@ -72,7 +79,15 @@ export function readCampaignSave(): CampaignSave {
 }
 
 export function writeCampaignSave(save: CampaignSave): void {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+  } catch {
+    // Keep playing with the in-memory save when storage is blocked or full.
+  }
+}
+
+function isNonnegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 const RANK_VALUE: Record<MissionRank, number> = { B: 1, A: 2, S: 3 };
