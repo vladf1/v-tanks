@@ -1,7 +1,8 @@
-import { createGame } from "./game-fixture.mjs";
+import { createGame, recordDrawing } from "./game-fixture.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { GameRenderer } from "../src/game/renderer.ts";
 import {
   MISSIONS,
   getMissionVisualTheme,
@@ -186,15 +187,13 @@ test("renderer draws ground details, obstacles, combatants and effects in depth 
   game.destroy();
 });
 
-test("wall runs keep the terrain grid visible between individual obstacles", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf("private drawWall");
-  const end = rendererSource.indexOf("private drawRockWall", start);
-  const drawWall = rendererSource.slice(start, end);
-  assert.doesNotMatch(drawWall, /fillRect\(wall\.x[^;]+wall\.height\)/);
+test("wall runs keep the terrain grid visible between individual obstacles", () => {
+  for (const kind of ['rock', 'dragons-teeth', 'hedgehog']) {
+    const { context, calls } = recordDrawing();
+    GameRenderer.renderWallPreview(context, { x: 0, y: 0, width: 180, height: 28, kind });
+    assert.ok(calls.some(c => c.name === 'fill' || c.name === 'stroke'));
+    assert.ok(!calls.some(c => c.name === 'fillRect' && c.args[2] >= 180 && c.args[3] >= 28));
+  }
 });
 
 test("wall cache respects display resolution, skips offscreen walls and reuses images", () => {
@@ -242,116 +241,115 @@ test("pointer conversion reuses bounds and refreshes after canvas movement", () 
   game.destroy();
 });
 
-test("mines use angular bodies and leave no oval mine craters", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const mineStart = rendererSource.indexOf("private drawMine(");
-  const mineEnd = rendererSource.indexOf("private drawArtilleryStrike", mineStart);
-  const drawMine = rendererSource.slice(mineStart, mineEnd);
-  assert.match(drawMine, /index < 8/);
-  assert.match(drawMine, /context\.lineTo\(0, 3\.2\)/);
 
-  const craterStart = rendererSource.indexOf('decal.kind === "mine-crater"');
-  const craterEnd = rendererSource.indexOf('decal.kind === "wall-chip"', craterStart);
-  const mineCrater = rendererSource.slice(craterStart, craterEnd);
-  assert.match(mineCrater, /index < 11/);
-  assert.doesNotMatch(mineCrater, /ellipse\(/);
+test("mines and their craters use angular paths", () => {
+  const { game } = createGame();
+  const { context, calls } = recordDrawing();
+  GameRenderer.renderMinePreview(context, { id: 1, x: 0, y: 0, radius: 9, owner: 'enemy', armTime: 0 }, 0);
+  assert.ok(calls.filter(c => c.name === 'lineTo').length >= 8);
+  calls.length = 0;
+  GameRenderer.renderDecalPreview(context, { id: 1, kind: 'mine-crater', x: 0, y: 0, size: 30, opacity: 1, angle: 0 });
+  assert.ok(calls.filter(c => c.name === 'lineTo').length >= 10);
+  assert.ok(!calls.some(c => c.name === 'ellipse'));
+  game.destroy();
 });
 
-test("destroyed relays leave angular electronic wreckage instead of an oval crater", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf('decal.kind === "relay-wreck"');
-  const end = rendererSource.indexOf('decal.kind === "wall-chip"', start);
-  const relayWreck = rendererSource.slice(start, end);
-  assert.match(relayWreck, /traceOilBlob/);
-  assert.match(relayWreck, /bezierCurveTo/);
-  assert.doesNotMatch(relayWreck, /ellipse\(/);
-
-  const engineSource = await readFile(
-    new URL("../src/game/engine.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(engineSource, /spawnExplosion\(node\.x, node\.y, 34, "#7bdcff", undefined, "relay-wreck"\)/);
+test("destroyed relays leave electronic wreckage at the objective position", () => {
+  const { game } = createGame();
+  game.startMission(MISSIONS.findIndex(m => m.objective.kind === 'relays'));
+  const node = game.objectiveNodes[0];
+  node.hp = 1;
+  game.tryPlayerShoot();
+  Object.assign(game.projectiles[0], { x: node.x, y: node.y, previousX: node.x, previousY: node.y });
+  assert.equal(game.projectileHitsObjective(game.projectiles[0]), true);
+  assert.equal(node.active, false);
+  const wreck = game.decals.find(d => d.kind === 'relay-wreck');
+  assert.deepEqual([wreck.x, wreck.y], [node.x, node.y]);
+  const { context, calls } = recordDrawing();
+  GameRenderer.renderDecalPreview(context, wreck);
+  assert.ok(calls.some(c => c.name === 'bezierCurveTo'));
+  assert.ok(!calls.some(c => c.name === 'ellipse'));
+  game.destroy();
 });
 
-test("mud hazards use irregular terrain shapes instead of an oval", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf('if (hazard.kind === "mud") {');
-  const end = rendererSource.indexOf('hazard.kind === "barrel"', start);
-  const mud = rendererSource.slice(start, end);
-  assert.match(mud, /traceOilBlob/);
-  assert.match(mud, /bezierCurveTo/);
-  assert.doesNotMatch(mud, /ellipse\(/);
+test("oil and mud reuse curved paths while decal opacity continues fading", () => {
+  const { game } = createGame();
+  for (const kind of ['oil', 'mud']) {
+    const { context, calls } = recordDrawing();
+    const item = { id: 1, kind, x: 10, y: 10, size: 30, radius: 30, angle: 0, opacity: 0.5, life: 20 };
+    const draw = () => kind === 'oil' ? GameRenderer.renderDecalPreview(context, item)
+      : GameRenderer.renderHazardPreview(context, item, 0);
+    draw();
+    const first = calls.find(c => c.name === 'fill' && c.args[0] instanceof Path2D);
+    assert.ok(first.args[0].calls.some(c => c[0] === 'quadraticCurveTo'));
+    calls.length = 0;
+    item.life = 4;
+    draw();
+    const next = calls.find(c => c.name === 'fill' && c.args[0] instanceof Path2D);
+    assert.equal(first.args[0], next.args[0]);
+    if (kind === 'oil') assert.equal(next.alpha, first.alpha / 2);
+    assert.ok(!calls.some(c => c.name === 'ellipse'));
+  }
+  game.destroy();
 });
 
-test("explosive barrels use a round drum top with a hazard plate", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf('hazard.kind === "barrel"');
-  const end = rendererSource.indexOf('hazard.kind === "minefield"', start);
-  const barrel = rendererSource.slice(start, end);
-  assert.match(barrel, /createRadialGradient/);
-  assert.match(barrel, /context\.arc\(0, 0, 16/);
-  assert.match(barrel, /context\.moveTo\(0, -8\)/);
-  assert.doesNotMatch(barrel, /fillRect\(/);
+test("barrels have circular tops and barricades grow with their collision radius", () => {
+  const barrel = recordDrawing();
+  GameRenderer.renderHazardPreview(barrel.context, { id: 1, kind: 'barrel', x: 0, y: 0, radius: 30 }, 0);
+  assert.ok(barrel.calls.some(c => c.name === 'arc'));
+  assert.ok(barrel.calls.some(c => c.name === 'fillText' && c.args[0] === '!'));
+  const widths = [30, 46].map(radius => {
+    const { context, calls } = recordDrawing();
+    GameRenderer.renderHazardPreview(context, { id: 1, kind: 'barricade', x: 0, y: 0, radius }, 0);
+    assert.ok(calls.some(c => c.name === 'fillText' && c.args[0] === 'SHOOT TO BREACH' && c.args[2] < -radius));
+    return Math.max(...calls.filter(c => c.name === 'lineTo').map(c => Math.abs(c.args[0])));
+  });
+  assert.ok(widths[1] > widths[0]);
 });
 
-test("barricade geometry scales with its collision radius", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf('hazard.kind === "barricade"');
-  const end = rendererSource.indexOf("private drawObjectiveNode", start);
-  const barricade = rendererSource.slice(start, end);
-  assert.match(barricade, /const halfWidth = hazard\.radius \* 1\.16/);
-  assert.match(barricade, /const halfHeight = hazard\.radius \* 0\.5/);
-  assert.match(barricade, /const calloutY = -hazard\.radius \* 1\.28/);
+test("uplink countdown text stays above its capture zone", () => {
+  const { game } = createGame();
+  game.startMission(MISSIONS.findIndex(m => m.objective.kind === 'hold'));
+  game.holdProgress = 7;
+  const { context, calls } = recordDrawing();
+  game.renderer.context = context;
+  for (const method of ['drawGround', 'drawWallLayer', 'drawTank', 'drawHazard', 'drawRadar',
+    'drawMine', 'drawPowerUp', 'drawAmmoPack', 'drawCrosshair', 'drawPlayerPowerUpEffects', 'drawTankHealthBar']) {
+    game.renderer[method] = () => {};
+  }
+  const node = game.objectiveNodes[0];
+  Object.assign(game.player, { x: node.x, y: node.y });
+  game.frame(0);
+  const label = calls.find(c => c.name === 'fillText' && c.args[0] === 'HOLD HERE  13s');
+  assert.ok(label && label.args[2] < -62);
+  game.destroy();
 });
 
-test("hedgehogs use contact shadows instead of black backing shapes", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf("private drawHedgehogs");
-  const end = rendererSource.indexOf("private drawTank", start);
-  const drawHedgehogs = rendererSource.slice(start, end);
-  assert.match(drawHedgehogs, /rgba\(0, 0, 0, 0\.26\)/);
-  assert.doesNotMatch(drawHedgehogs, /rgba\(0, 0, 0, 0\.72\)/);
-});
-
-test("uplink circles show the hold instruction and live countdown above the zone", async () => {
-  const rendererSource = await readFile(
-    new URL("../src/game/renderer.ts", import.meta.url),
-    "utf8",
-  );
-  const start = rendererSource.indexOf("private drawObjectiveNode");
-  const end = rendererSource.indexOf("private drawMine", start);
-  const drawObjectiveNode = rendererSource.slice(start, end);
-  assert.match(drawObjectiveNode, /const uplinkLabelY = -78/);
-  assert.match(drawObjectiveNode, /actualBoundingBoxLeft/);
-  assert.match(drawObjectiveNode, /actualBoundingBoxAscent/);
-  assert.match(drawObjectiveNode, /fillText\(uplinkLabel, labelX, labelBaselineY\)/);
-  assert.match(drawObjectiveNode, /context\.lineWidth = 0\.6/);
-  assert.match(drawObjectiveNode, /secondsRemaining \?\? 20/);
-  assert.doesNotMatch(drawObjectiveNode, /fillText\("HOLD HERE", 0, -8\)/);
-
-  const engineSource = await readFile(
-    new URL("../src/game/engine.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(engineSource, /uplinkSecondsRemaining:[\s\S]*targetSeconds - this\.holdProgress/);
+test("menu painting is reused until resize, a new player, or a return from gameplay", () => {
+  const { game, canvas } = createGame();
+  game.renderer.context = recordDrawing().context;
+  for (const method of ['drawBackdrop', 'drawGround', 'drawMission', 'drawRadar']) game.renderer[method] = () => {};
+  let paints = 0;
+  game.renderer.drawAttractScene = () => paints++;
+  game.showMenu();
+  game.frame(0);
+  game.frame(16);
+  assert.equal(paints, 1);
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1200, height: 750 });
+  game.renderer.refreshBounds();
+  game.frame(32);
+  assert.equal(paints, 2);
+  game.startMission(1);
+  game.showMenu();
+  game.frame(48);
+  assert.equal(paints, 3);
+  game.setPhase('paused');
+  game.frame(64);
+  game.showMenu();
+  game.frame(80);
+  assert.equal(paints, 4);
+  assert.equal(game.decals.length, 0);
+  game.destroy();
 });
 
 test("victory and defeat cross-fade over the retained arena with reduced-motion support", async () => {
@@ -389,15 +387,4 @@ test("ammunition HUD is anchored below the minimap", async () => {
   const ammoReadout = stylesheet.slice(start, end);
   assert.match(ammoReadout, /top:\s*auto/);
   assert.match(ammoReadout, /bottom:\s*108px/);
-});
-
-test("eliminate missions do not repeat enemy progress in the objective readout", async () => {
-  const uiSource = await readFile(
-    new URL("../src/game/VTanks.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(
-    uiSource,
-    /\[data-objective-readout\][\s\S]*currentMission\.objective\.kind === "eliminate"/,
-  );
 });

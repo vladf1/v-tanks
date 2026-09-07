@@ -12,34 +12,10 @@ export interface Loadout {
   utility: UtilityKind;
 }
 
-export interface LoadoutOption {
-  label: string;
-  description: string;
-}
-
 export const DEFAULT_LOADOUT: Loadout = {
   cannon: "ricochet",
   chassis: "balanced",
   utility: "dash",
-};
-
-export const CANNONS: Record<CannonKind, LoadoutOption> = {
-  rapid: { label: "Cycler", description: "Fast reload, lighter shells." },
-  heavy: { label: "Siege", description: "Slow reload, double damage." },
-  ricochet: { label: "Bankshot", description: "Two wall bounces." },
-};
-
-export const CHASSIS: Record<ChassisKind, LoadoutOption> = {
-  fast: { label: "Raptor", description: "Fast movement, 2 hull." },
-  armored: { label: "Bulwark", description: "Slower movement, 5 hull." },
-  balanced: { label: "Vanguard", description: "Balanced speed and 3 hull." },
-};
-
-export const UTILITIES: Record<UtilityKind, LoadoutOption> = {
-  dash: { label: "Overdrive", description: "Right click to surge through incoming fire." },
-  shield: { label: "Aegis", description: "Right click to raise a three-hit shield." },
-  mine: { label: "Sapper", description: "Right click to deploy a proximity mine." },
-  shock: { label: "Arc Pulse", description: "Right click to stun every nearby hostile." },
 };
 
 export const PLAYER_TANK_KINDS = ["raptor", "vanguard", "bulwark", "sapper"] as const;
@@ -141,12 +117,6 @@ export function parseLoadout(value: unknown): Loadout {
       ? candidate.utility as UtilityKind
       : DEFAULT_LOADOUT.utility,
   };
-}
-
-export function getChassisStats(kind: ChassisKind): { hp: number; speed: number } {
-  if (kind === "fast") return { hp: 2, speed: 1.2 };
-  if (kind === "armored") return { hp: 5, speed: 0.82 };
-  return { hp: 3, speed: 1 };
 }
 
 export function getCannonStats(kind: CannonKind): {

@@ -132,3 +132,142 @@ test('all missions start with separate ammo and power-up placements', () => {
   }
   game.destroy();
 });
+
+test('piercing hits count one accurate shot and retain individual ricochet hits', () => {
+  const { game, snapshots } = createGame();
+  game.enemies = [game.createEnemy('guard', { x: 500, y: 300 }), game.createEnemy('guard', { x: 600, y: 300 })];
+  game.selectedAmmo = 'piercing';
+  game.ammunition.piercing = 1;
+  game.tryPlayerShoot();
+  const projectile = game.projectiles[0];
+  projectile.ricocheted = true;
+  for (const enemy of game.enemies) {
+    Object.assign(projectile, { x: enemy.x, y: enemy.y, previousX: enemy.x - 5, previousY: enemy.y });
+    game.projectileHitsTank(projectile);
+  }
+  // A subsequent relay hit by the same round must not count another accurate shot.
+  game.objectiveNodes = [{ x: 700, y: 300, radius: 24, hp: 3, active: true, kind: 'relay' }];
+  Object.assign(projectile, { x: 700, previousX: 695 });
+  game.projectileHitsObjective(projectile);
+  game.publishSnapshot();
+  assert.equal(snapshots.at(-1).shots, 1);
+  assert.equal(snapshots.at(-1).hits, 1);
+  assert.equal(game.ricochetHits, 3);
+  game.destroy();
+});
+
+test('survival reinforcement gameplay is independent of cosmetic randomness', () => {
+  const { game } = createGame();
+  const random = Math.random;
+  const runs = [];
+  try {
+    for (const cosmeticRandom of [0.1, 0.9]) {
+      Math.random = () => cosmeticRandom;
+      game.startSurvival(20260907);
+      const spawns = [];
+      for (let i = 0; i < 8; i++) {
+        game.enemies = [];
+        game.reinforcementTimer = 0;
+        game.updateReinforcements(1 / 120);
+        spawns.push([game.enemies[0], game.reinforcementTimer]);
+      }
+      runs.push(spawns);
+    }
+    assert.deepEqual(runs[0], runs[1]);
+  } finally { Math.random = random; game.destroy(); }
+});
+
+test('repeated action keys do not toggle pause or restart; movement keys remain held', () => {
+  const { game } = createGame();
+  game.onKeyDown({ key: 'Escape' });
+  game.onKeyDown({ key: 'Escape', repeat: true });
+  assert.equal(game.phase, 'paused');
+  game.onKeyDown({ key: 'Escape' });
+  game.elapsed = 12;
+  game.onKeyDown({ key: 'r', repeat: true });
+  assert.equal(game.elapsed, 12);
+  game.onKeyDown({ key: 'w', repeat: true, preventDefault() {} });
+  assert.ok(game.keys.has('w'));
+  game.destroy();
+});
+
+test('engine audio is silent after every exit from play, including mute toggles', () => {
+  const { game } = createGame();
+  const gains = [];
+  game.audio.context = { currentTime: 0, close() {} };
+  game.audio.engineOscillator = { frequency: { setTargetAtTime() {} }, stop() {} };
+  game.audio.engineGain = { gain: { setTargetAtTime: value => gains.push(value) } };
+  game.setSound(true);
+  for (const phase of ['paused', 'menu', 'victory', 'defeat']) {
+    game.startMission(0);
+    game.audio.engine(1);
+    assert.ok(gains.at(-1) > 0);
+    game.keys.add('w');
+    game.primaryFireHeld = true;
+    game.setPhase(phase);
+    game.setSound(false);
+    game.setSound(true);
+    assert.equal(gains.at(-1), 0);
+    assert.equal(game.keys.size, 0);
+    assert.equal(game.primaryFireHeld, false);
+  }
+  game.destroy();
+});
+
+test('objective snapshots distinguish survival and each Omega stage', () => {
+  const { game, snapshots } = createGame();
+  game.startSurvival(1);
+  assert.equal(snapshots.at(-1).objectiveStage, 'survival');
+  game.startMission(MISSIONS.length - 1);
+  assert.equal(snapshots.at(-1).objectiveStage, 'shields');
+  game.objectiveNodes.forEach(node => { if (node.kind === 'relay') node.active = false; });
+  game.publishSnapshot();
+  assert.equal(snapshots.at(-1).objectiveStage, 'boss');
+  game.enemies = [];
+  game.updateObjective(0);
+  game.publishSnapshot();
+  assert.equal(snapshots.at(-1).objectiveStage, 'extract');
+  assert.ok(game.objectiveNodes.find(node => node.kind === 'extract').active);
+  game.destroy();
+});
+
+test('stun expires with enemy updates even when visual updates are skipped', () => {
+  const { game } = createGame();
+  const enemy = game.enemies[0];
+  enemy.stunned = 0.02;
+  const start = { x: enemy.x, y: enemy.y };
+  game.updateEnemies(0.02);
+  assert.equal(enemy.stunned, 0);
+  assert.deepEqual({ x: enemy.x, y: enemy.y }, start);
+  game.updateEnemies(0.02);
+  assert.notDeepEqual({ x: enemy.x, y: enemy.y }, start);
+  game.destroy();
+});
+
+test('direct hits and area attacks honor boss shielding and award one source-specific kill', () => {
+  const { game } = createGame();
+  const attacks = [
+    [p => game.projectileHitsTank(p), 2500],
+    [p => game.applyExplosiveImpact(p, -1), 140],
+    [p => game.applyProjectileInterceptionBlast(p, 44), 120],
+    [p => game.detonate(p.x, p.y, 82, 'player'), 120],
+  ];
+  for (const [attack, score] of attacks) {
+    game.startMission(MISSIONS.length - 1);
+    const boss = game.enemies.find(e => e.kind === 'boss');
+    game.enemies = [boss];
+    game.spawnProjectile(game.player, 0, 'player', 500, 0, 1, 'explosive');
+    const p = game.projectiles[0];
+    Object.assign(p, { x: boss.x, y: boss.y, previousX: boss.x, previousY: boss.y });
+    attack(p);
+    assert.equal(boss.hp, boss.maxHp);
+    game.objectiveNodes.forEach(node => { node.active = false; });
+    boss.hp = 1;
+    attack(p);
+    attack(p);
+    assert.equal(boss.alive, false);
+    assert.equal(game.score, score);
+    assert.equal(game.wrecks.length, 1);
+  }
+  game.destroy();
+});

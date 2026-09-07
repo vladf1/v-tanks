@@ -52,7 +52,6 @@ test("minefield hazards expand into five individually shootable mines", () => {
   assert.equal(mines.length, 5);
   assert.ok(mines.every((mine) => (
     mine.owner === "enemy"
-      && mine.fieldMine
       && mine.radius === 9
       && mine.armTime === 0
   )));
@@ -68,7 +67,6 @@ test("mine blasts propagate through nearby mines", () => {
     armTime: 0,
     life: Number.POSITIVE_INFINITY,
     radius: 9,
-    fieldMine: true,
   });
   const initial = createMine(1, 100);
   const adjacent = createMine(2, 100 + MINE_BLAST_RADIUS - 2);

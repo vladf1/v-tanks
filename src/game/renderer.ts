@@ -64,8 +64,10 @@ function getTankRoleAccent(kind: Tank["kind"], accent: string): string {
         : kind === "artillery" ? "#ffe27a" : accent;
 }
 
-function traceOilBlob(
-  context: CanvasRenderingContext2D,
+// Geometry stays fixed for each decal/hazard; weak keys release paths with their owner.
+const oilBlobPaths = new WeakMap<object, Map<number, Path2D>>();
+
+function oilBlobPath(
   decal: Pick<Decal, "id" | "x" | "y">,
   salt: number,
   centerX: number,
@@ -73,7 +75,12 @@ function traceOilBlob(
   radiusX: number,
   radiusY: number,
   pointCount = 13,
-): void {
+): Path2D {
+  let paths = oilBlobPaths.get(decal);
+  if (!paths) oilBlobPaths.set(decal, paths = new Map());
+  const cached = paths.get(salt);
+  if (cached) return cached;
+  const path = new Path2D();
   const seed = decal.id * 37 + Math.round(decal.x) * 3 + Math.round(decal.y) * 5 + salt;
   const points = Array.from({ length: pointCount }, (_, index) => {
     const angle = (index / pointCount) * TAU;
@@ -86,18 +93,19 @@ function traceOilBlob(
   });
   const first = points[0];
   const last = points.at(-1) ?? first;
-  context.beginPath();
-  context.moveTo((last.x + first.x) * 0.5, (last.y + first.y) * 0.5);
+  path.moveTo((last.x + first.x) * 0.5, (last.y + first.y) * 0.5);
   points.forEach((point, index) => {
     const next = points[(index + 1) % points.length];
-    context.quadraticCurveTo(
+    path.quadraticCurveTo(
       point.x,
       point.y,
       (point.x + next.x) * 0.5,
       (point.y + next.y) * 0.5,
     );
   });
-  context.closePath();
+  path.closePath();
+  paths.set(salt, path);
+  return path;
 }
 
 export interface RenderState {
@@ -152,6 +160,7 @@ export class GameRenderer {
     }>;
   };
   private backdropLayer?: HTMLCanvasElement;
+  private menuPlayer?: Tank;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -363,6 +372,9 @@ export class GameRenderer {
   }
 
   render(state: RenderState): void {
+    // Menu artwork stays fixed until the next operation or canvas resize.
+    if (state.phase === "menu" && this.menuPlayer === state.player) return;
+    this.menuPlayer = state.phase === "menu" ? state.player : undefined;
     const context = this.context;
     const camera = state.phase === "menu" ? { x: 0, y: 0 } : getCameraPosition(state.player);
     this.cameraX = camera.x;
@@ -406,6 +418,7 @@ export class GameRenderer {
     this.canvasTop = rect.top;
     if (this.displayWidth === rect.width && this.displayHeight === rect.height
       && this.dpr === (window.devicePixelRatio || 1)) return;
+    this.menuPlayer = undefined;
     this.displayWidth = rect.width;
     this.displayHeight = rect.height;
     this.dpr = window.devicePixelRatio || 1;
@@ -603,7 +616,7 @@ export class GameRenderer {
 
   private drawMission(context: CanvasRenderingContext2D, state: RenderState): void {
     for (const decal of state.decals) {
-      if (decal.id >= 0 && this.isVisible(decal, decal.size + 30)) this.drawDecal(context, decal);
+      if (this.isVisible(decal, decal.size + 30)) this.drawDecal(context, decal);
     }
     for (const mark of state.trackMarks) {
       if (this.isVisible(mark, 24)) this.drawTrackMark(context, mark);
@@ -727,13 +740,11 @@ export class GameRenderer {
     context.fillStyle = decal.color;
     context.strokeStyle = decal.color;
     if (decal.kind === "oil") {
-      traceOilBlob(context, decal, 11, 0, 0, decal.size, decal.size * 0.72);
-      context.fill();
+      context.fill(oilBlobPath(decal, 11, 0, 0, decal.size, decal.size * 0.72));
 
       context.globalAlpha *= 0.58;
       context.fillStyle = "#020403";
-      traceOilBlob(
-        context,
+      context.fill(oilBlobPath(
         decal,
         97,
         decal.size * 0.08,
@@ -741,8 +752,7 @@ export class GameRenderer {
         decal.size * 0.62,
         decal.size * 0.4,
         11,
-      );
-      context.fill();
+      ));
 
       context.globalAlpha *= 0.72;
       context.fillStyle = decal.color;
@@ -751,8 +761,7 @@ export class GameRenderer {
         const angle = noise(dropletSeed + index * 19) * TAU;
         const distance = decal.size * (0.9 + noise(dropletSeed + index * 29) * 0.52);
         const radius = decal.size * (0.07 + noise(dropletSeed + index * 41) * 0.09);
-        traceOilBlob(
-          context,
+        context.fill(oilBlobPath(
           decal,
           211 + index * 43,
           Math.cos(angle) * distance,
@@ -760,8 +769,7 @@ export class GameRenderer {
           radius,
           radius * (0.72 + noise(dropletSeed + index * 47) * 0.38),
           7,
-        );
-        context.fill();
+        ));
       }
     } else if (decal.kind === "scorch") {
       context.beginPath();
@@ -826,8 +834,7 @@ export class GameRenderer {
       const wreckSeed = decal.id * 83 + Math.round(decal.x) * 3 + Math.round(decal.y) * 7;
       context.globalAlpha = baseAlpha * 0.62;
       context.fillStyle = "#020504";
-      traceOilBlob(
-        context,
+      context.fill(oilBlobPath(
         decal,
         331,
         0,
@@ -835,8 +842,7 @@ export class GameRenderer {
         decal.size * 0.86,
         decal.size * 0.58,
         11,
-      );
-      context.fill();
+      ));
 
       context.globalAlpha = Math.min(1, baseAlpha * 1.5);
       context.strokeStyle = decal.color;
@@ -1091,13 +1097,12 @@ export class GameRenderer {
       context.fillStyle = "rgba(78, 57, 31, 0.48)";
       context.strokeStyle = "rgba(177, 139, 82, 0.42)";
       context.lineWidth = 1.1;
-      traceOilBlob(context, hazard, 17, 0, 0, hazard.radius, hazard.radius * 0.72, 15);
-      context.fill();
-      context.stroke();
+      const outline = oilBlobPath(hazard, 17, 0, 0, hazard.radius, hazard.radius * 0.72, 15);
+      context.fill(outline);
+      context.stroke(outline);
 
       context.fillStyle = "rgba(23, 18, 11, 0.34)";
-      traceOilBlob(
-        context,
+      context.fill(oilBlobPath(
         hazard,
         113,
         hazard.radius * 0.08,
@@ -1105,8 +1110,7 @@ export class GameRenderer {
         hazard.radius * 0.68,
         hazard.radius * 0.43,
         12,
-      );
-      context.fill();
+      ));
 
       context.lineCap = "round";
       for (const side of [-1, 1]) {
@@ -1214,7 +1218,6 @@ export class GameRenderer {
           armTime: 0,
           life: Number.POSITIVE_INFINITY,
           radius: 9,
-          fieldMine: true,
         }, time);
       }
     } else if (hazard.kind === "repair-station") {

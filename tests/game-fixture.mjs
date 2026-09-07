@@ -6,6 +6,12 @@ export function createGame() {
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = () => {};
+  globalThis.Path2D = class {
+    calls = [];
+    moveTo(...args) { this.calls.push(['moveTo', ...args]); }
+    quadraticCurveTo(...args) { this.calls.push(['quadraticCurveTo', ...args]); }
+    closePath() { this.calls.push(['closePath']); }
+  };
   const canvas = {
     getContext: () => ({}),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 960, height: 600 }),
@@ -16,4 +22,20 @@ export function createGame() {
   game.setSound(false);
   game.startMission(0);
   return { game, snapshots, canvas };
+}
+
+export function recordDrawing() {
+  const calls = [];
+  const context = new Proxy({ globalAlpha: 1 }, {
+    get(target, name) {
+      if (name in target) return target[name];
+      return (...args) => {
+        calls.push({ name, args, alpha: target.globalAlpha, color: target.fillStyle });
+        if (name === 'measureText') return { actualBoundingBoxLeft: 0, actualBoundingBoxRight: 80,
+          actualBoundingBoxAscent: 7, actualBoundingBoxDescent: 2 };
+        if (name === 'createRadialGradient' || name === 'createLinearGradient') return { addColorStop() {} };
+      };
+    },
+  });
+  return { context, calls };
 }

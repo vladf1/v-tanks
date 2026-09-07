@@ -150,7 +150,7 @@
       import { createMinefieldMines, TankGame } from "/src/game/engine.ts";
       import { MISSIONS } from "/src/game/levels.ts";
       import { GameRenderer } from "/src/game/renderer.ts";
-      import { generateEnvironmentalDetails, VISUAL_THEMES } from "/src/game/visual-state.ts";
+      import { VISUAL_THEMES } from "/src/game/visual-state.ts";
 
       const mission = MISSIONS.reduce((best, candidate) => (
         candidate.enemies.length + candidate.walls.length + candidate.hazards.length
@@ -194,14 +194,11 @@
         size: 2 + index % 8, color: index % 11 === 0 ? "#7bdcff" : "#ffb29d",
         angle: index * 0.17,
       }));
-      const decals = [
-        ...generateEnvironmentalDetails(mission),
-        ...Array.from({ length: 150 }, (_, index) => ({
-          id: index + 1, kind: index % 5 === 0 ? "oil" : index % 2 ? "scorch" : "rubble",
-          x: 30 + (index * 101) % 1980, y: 30 + (index * 151) % 1090,
-          angle: index * 0.31, size: 8 + index % 16, opacity: 0.4, color: "#24241a", life: 12,
-        })),
-      ];
+      const decals = Array.from({ length: 150 }, (_, index) => ({
+        id: index + 1, kind: index % 5 === 0 ? "oil" : index % 2 ? "scorch" : "rubble",
+        x: 30 + (index * 101) % 1980, y: 30 + (index * 151) % 1090,
+        angle: index * 0.31, size: 8 + index % 16, opacity: 0.4, color: "#24241a", life: 12,
+      }));
       const trackMarks = Array.from({ length: 300 }, (_, index) => ({
         x: 20 + (index * 73) % 2000, y: 20 + (index * 109) % 1110,
         angle: index * 0.13, life: 4, maxLife: 5, color: "#27372f", width: 3,
@@ -217,7 +214,7 @@
         phase: "playing", mission, player, enemies, projectiles, particles,
         powerUps: [], ammoPacks: [], activePowerUps: createActivePowerUps(),
         objectiveNodes: [], uplinkSecondsRemaining: null,
-        hazards: mission.hazards.filter(({ kind }) => kind !== "minefield").map((hazard) => ({ ...hazard, active: true, cooldown: 0 })),
+        hazards: mission.hazards.filter(({ kind }) => kind !== "minefield").map((hazard) => ({ ...hazard, active: true })),
         mines: createMinefieldMines(mission.hazards), artilleryStrikes: [],
         trackMarks, decals, wrecks, ejectedTurrets: [],
         theme: VISUAL_THEMES[mission.visualTheme], shake: 0,

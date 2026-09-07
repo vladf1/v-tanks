@@ -8,7 +8,6 @@ import {
   PLAYER_TANKS,
   UTILITY_KINDS,
   getCannonStats,
-  getChassisStats,
   parseLoadout,
 } from "../src/game/loadouts.ts";
 import { bestRecord } from "../src/game/progress.ts";
@@ -58,8 +57,6 @@ test("loadout options are balanced sidegrades with validated fallbacks", () => {
   assert.ok(PLAYER_TANKS.bulwark.hp > PLAYER_TANKS.raptor.hp);
   assert.ok(getCannonStats("rapid").reload < getCannonStats("heavy").reload);
   assert.ok(getCannonStats("heavy").damage > getCannonStats("rapid").damage);
-  assert.ok(getChassisStats("fast").speed > getChassisStats("armored").speed);
-  assert.ok(getChassisStats("armored").hp > getChassisStats("fast").hp);
   assert.deepEqual(parseLoadout({ cannon: "bad", chassis: "fast", utility: "mine" }), {
     cannon: "ricochet",
     chassis: "fast",

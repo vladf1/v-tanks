@@ -74,7 +74,6 @@ import {
   VISUAL_THEMES,
   WRECK_FADE_SECONDS,
   WRECK_SOLID_SECONDS,
-  generateEnvironmentalDetails,
   pushCapped,
   updateEjectedTurret,
   type Decal,
@@ -85,6 +84,8 @@ import {
 
 export type GamePhase = "menu" | "playing" | "paused" | "victory" | "defeat";
 export type GameMode = "campaign" | "survival";
+export type ObjectiveStage = "eliminate" | "relays" | "hold" | "survive"
+  | "shields" | "boss" | "extract" | "survival";
 export const MINE_BLAST_RADIUS = 82;
 
 export interface GameSnapshot {
@@ -96,7 +97,6 @@ export interface GameSnapshot {
   enemiesLeft: number;
   activeEnemies: number;
   totalEnemies: number;
-  completionPercent: number;
   elapsed: number;
   shots: number;
   hits: number;
@@ -109,7 +109,7 @@ export interface GameSnapshot {
   bossPhase: number | null;
   activePowerUps: ActivePowerUpSnapshot[];
   objectiveLabel: string;
-  objectiveProgress: number;
+  objectiveStage: ObjectiveStage;
   objectiveDetail: string;
   bonusLabel: string;
   bonusComplete: boolean;
@@ -165,6 +165,7 @@ export interface Projectile extends Point {
   kind: AmmoKind;
   penetrations: number;
   hitTankIds: number[];
+  hitRegistered: boolean;
   ignoresProjectiles: boolean;
   explosionRadius: number;
   stunRadius: number;
@@ -198,7 +199,6 @@ export interface ObjectiveNode extends Point {
 
 export interface HazardState extends HazardSpawn {
   active: boolean;
-  cooldown: number;
 }
 
 export interface ProximityMine extends Point {
@@ -207,13 +207,11 @@ export interface ProximityMine extends Point {
   armTime: number;
   life: number;
   radius: number;
-  fieldMine: boolean;
 }
 
 export interface ArtilleryStrike extends Point {
   delay: number;
   radius: number;
-  enemyId: number;
 }
 
 export interface TrackMark extends Point {
@@ -383,7 +381,6 @@ export function createMinefieldMines(hazards: HazardSpawn[]): ProximityMine[] {
         armTime: 0,
         life: Number.POSITIVE_INFINITY,
         radius: 9,
-        fieldMine: true,
       };
     });
   });
@@ -412,13 +409,12 @@ class SynthAudio {
   private context: AudioContext | null = null;
   private engineOscillator: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+  private engineIntensity: number | null = null;
   enabled = true;
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (this.engineGain && this.context) {
-      this.engineGain.gain.setTargetAtTime(enabled ? 0.006 : 0, this.context.currentTime, 0.04);
-    }
+    this.engine(this.engineIntensity);
   }
 
   private getContext(): AudioContext | null {
@@ -469,9 +465,11 @@ class SynthAudio {
     this.tone(720, 0.18, 0.035, "triangle");
   }
 
-  engine(intensity: number): void {
-    if (!this.context || !this.enabled) return;
+  engine(intensity: number | null): void {
+    this.engineIntensity = intensity;
+    if (!this.context) return;
     if (!this.engineOscillator || !this.engineGain) {
+      if (!this.enabled || intensity === null) return;
       this.engineOscillator = this.context.createOscillator();
       this.engineGain = this.context.createGain();
       this.engineOscillator.type = "sawtooth";
@@ -481,12 +479,12 @@ class SynthAudio {
       this.engineOscillator.start();
     }
     this.engineOscillator.frequency.setTargetAtTime(
-      42 + intensity * 34,
+      42 + (intensity ?? 0) * 34,
       this.context.currentTime,
       0.05,
     );
     this.engineGain.gain.setTargetAtTime(
-      intensity > 0 ? 0.007 : 0.002,
+      this.enabled && intensity !== null ? (intensity > 0 ? 0.007 : 0.002) : 0,
       this.context.currentTime,
       0.08,
     );
@@ -587,7 +585,6 @@ export class TankGame {
   }
 
   showMenu(): void {
-    this.primaryFireHeld = false;
     this.setPhase("menu");
   }
 
@@ -652,14 +649,13 @@ export class TankGame {
     this.mines = createMinefieldMines(this.mission.hazards);
     this.artilleryStrikes = [];
     this.trackMarks = [];
-    this.decals = generateEnvironmentalDetails(this.mission);
+    this.decals = [];
     this.wrecks = [];
     this.ejectedTurrets = [];
     this.nextDecalId = 1;
     this.hazards = this.mission.hazards.filter((hazard) => hazard.kind !== "minefield").map((hazard) => ({
       ...hazard,
       active: true,
-      cooldown: 0,
     }));
     this.objectiveNodes = this.mission.objective.positions.map((position, index) => ({
       ...position,
@@ -689,7 +685,6 @@ export class TankGame {
 
   pause(): void {
     if (this.phase !== "playing") return;
-    this.primaryFireHeld = false;
     this.setPhase("paused");
   }
 
@@ -877,6 +872,7 @@ export class TankGame {
       event.preventDefault();
       this.keys.add(key);
     }
+    if (event.repeat) return;
     if (key === "escape") {
       if (this.phase === "playing") this.pause();
       else if (this.phase === "paused") this.resume();
@@ -955,7 +951,7 @@ export class TankGame {
     this.updateEnemies(delta);
     this.updateProjectiles(delta);
     this.updateReinforcements(delta);
-    this.updateHazards(delta);
+    this.updateHazards();
     this.updateMines(delta);
     this.updateArtillery(delta);
     // Wrecks own dead tank visuals; retain only live combatants between steps.
@@ -1034,7 +1030,10 @@ export class TankGame {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
       enemy.cooldown = Math.max(0, enemy.cooldown - delta);
-      if (enemy.stunned > 0) continue;
+      if (enemy.stunned > 0) {
+        enemy.stunned = Math.max(0, enemy.stunned - delta);
+        continue;
+      }
       const dx = this.player.x - enemy.x;
       const dy = this.player.y - enemy.y;
       const distance = Math.hypot(dx, dy);
@@ -1082,7 +1081,6 @@ export class TankGame {
             armTime: 0.8,
             life: 18,
             radius: 9,
-            fieldMine: false,
           });
           enemy.dashCooldown = 4.8;
         }
@@ -1144,9 +1142,10 @@ export class TankGame {
     );
     enemy.hullAngle = inwardAngle;
     enemy.turretAngle = inwardAngle;
+    const random = this.mode === "survival" ? this.survivalRandom : Math.random;
     enemy.cooldown = enemy.ultraAggressive
-      ? 0.5 + (Math.random() * 0.2)
-      : 1.1 + (Math.random() * 0.45);
+      ? 0.5 + (random() * 0.2)
+      : 1.1 + (random() * 0.45);
     this.enemies.push(enemy);
     if (this.mode === "campaign") this.reinforcementsRemaining -= 1;
     this.reinforcementTimer = this.mode === "survival"
@@ -1274,7 +1273,6 @@ export class TankGame {
         y: this.player.y,
         delay: 1.35,
         radius: 52,
-        enemyId: enemy.id,
       });
       return;
     }
@@ -1335,6 +1333,7 @@ export class TankGame {
       kind,
       penetrations: ammo.penetrations,
       hitTankIds: [],
+      hitRegistered: false,
       ignoresProjectiles: owner === "player" && ammo.ignoresProjectiles,
       explosionRadius: owner === "player" ? ammo.explosionRadius : 0,
       stunRadius: owner === "player" ? ammo.stunRadius : 0,
@@ -1440,7 +1439,6 @@ export class TankGame {
       armTime: 0.45,
       life: 25,
       radius: 9,
-      fieldMine: false,
     });
     this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
     this.audio.powerUp();
@@ -1642,14 +1640,7 @@ export class TankGame {
         !enemy.alive
         || !isPointInsideProjectileInterceptionBlast(enemy, interception, blastRadius)
       ) continue;
-      if (
-        enemy.kind === "boss"
-        && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
-      ) continue;
-      enemy.hp -= PROJECTILE_INTERCEPTION_DAMAGE;
-      enemy.damageFlash = 0.12;
-      enemy.lastHitDirection = Math.atan2(interception.y - enemy.y, interception.x - enemy.x);
-      if (enemy.hp <= 0) this.destroyEnemy(enemy, 120);
+      this.damageEnemy(enemy, PROJECTILE_INTERCEPTION_DAMAGE, interception, 120);
     }
   }
 
@@ -1675,10 +1666,7 @@ export class TankGame {
       if (projectile.hitTankIds.includes(enemy.id)) continue;
       const radius = projectile.radius + enemy.radius;
       if (projectileSegmentDistanceSquared(projectile, enemy) > radius * radius) continue;
-      if (
-        enemy.kind === "boss"
-        && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
-      ) {
+      if (this.isBossShielded(enemy)) {
         this.spawnImpactParticles(
           projectile.x,
           projectile.y,
@@ -1719,21 +1707,13 @@ export class TankGame {
         }
       }
       if (supportingTank) {
-        supportingTank.hp -= 1;
-        supportingTank.damageFlash = 0.12;
-        supportingTank.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
+        this.damageEnemy(supportingTank, 1, projectile, 160);
         this.spawnImpactParticles(enemy.x, enemy.y, "#7bdcff", 10);
         this.spawnShieldArc(enemy.x, enemy.y, "#7bdcff");
-        if (supportingTank.hp <= 0) {
-          this.destroyEnemy(supportingTank, 160);
-        }
         return true;
       }
-      enemy.hp -= projectile.damage;
-      enemy.damageFlash = 0.12;
-      enemy.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
-      this.hits += 1;
-      if (projectile.ricocheted) this.ricochetHits += 1;
+      this.damageEnemy(enemy, projectile.damage, projectile);
+      this.registerHit(projectile);
       this.spawnImpactParticles(
         projectile.x,
         projectile.y,
@@ -1744,9 +1724,6 @@ export class TankGame {
       this.audio.impact();
       if (projectile.explosionRadius > 0) this.applyExplosiveImpact(projectile, enemy.id);
       if (projectile.stunRadius > 0) this.applyEmpImpact(projectile);
-      if (enemy.hp <= 0) {
-        this.destroyEnemy(enemy);
-      }
       if (projectile.kind === "piercing" && projectile.penetrations > 0) {
         projectile.hitTankIds.push(enemy.id);
         projectile.penetrations -= 1;
@@ -1755,6 +1732,25 @@ export class TankGame {
       return true;
     }
     return false;
+  }
+
+  private registerHit(projectile: Projectile): void {
+    if (!projectile.hitRegistered) this.hits += 1;
+    projectile.hitRegistered = true;
+    if (projectile.ricocheted) this.ricochetHits += 1;
+  }
+
+  private isBossShielded(enemy: EnemyTank): boolean {
+    return enemy.kind === "boss"
+      && this.objectiveNodes.some((node) => node.kind === "relay" && node.active);
+  }
+
+  private damageEnemy(enemy: EnemyTank, damage: number, source: Point, score?: number): void {
+    if (!enemy.alive || this.isBossShielded(enemy)) return;
+    enemy.hp -= damage;
+    enemy.damageFlash = 0.12;
+    enemy.lastHitDirection = Math.atan2(source.y - enemy.y, source.x - enemy.x);
+    if (enemy.hp <= 0) this.destroyEnemy(enemy, score);
   }
 
   private destroyEnemy(enemy: EnemyTank, score = enemy.kind === "boss"
@@ -1781,11 +1777,7 @@ export class TankGame {
     for (const enemy of this.enemies) {
       if (!enemy.alive || enemy.id === directEnemyId) continue;
       if (distanceSquared(enemy, projectile) >= projectile.explosionRadius ** 2) continue;
-      if (enemy.kind === "boss" && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)) continue;
-      enemy.hp -= 1;
-      enemy.damageFlash = 0.12;
-      enemy.lastHitDirection = Math.atan2(projectile.y - enemy.y, projectile.x - enemy.x);
-      if (enemy.hp <= 0) this.destroyEnemy(enemy, 140);
+      this.damageEnemy(enemy, 1, projectile, 140);
     }
   }
 
@@ -1804,8 +1796,7 @@ export class TankGame {
       const radius = node.radius + projectile.radius;
       if (projectileSegmentDistanceSquared(projectile, node) > radius * radius) continue;
       node.hp -= projectile.damage;
-      this.hits += 1;
-      if (projectile.ricocheted) this.ricochetHits += 1;
+      this.registerHit(projectile);
       this.spawnImpactParticles(projectile.x, projectile.y, "#7bdcff", 12);
       if (node.hp <= 0) {
         node.active = false;
@@ -1853,9 +1844,8 @@ export class TankGame {
     return false;
   }
 
-  private updateHazards(delta: number): void {
+  private updateHazards(): void {
     for (const hazard of this.hazards) {
-      hazard.cooldown = Math.max(0, hazard.cooldown - delta);
       if (!hazard.active) continue;
       const playerDistance = distanceSquared(this.player, hazard);
       if (
@@ -2005,41 +1995,26 @@ export class TankGame {
     return this.holdProgress >= 1;
   }
 
-  private getObjectiveProgress(): { progress: number; detail: string } {
+  private getObjectiveStatus(): { stage: ObjectiveStage; detail: string } {
     if (this.mode === "survival") {
-      return {
-        progress: Math.min(1, (this.elapsed % 30) / 30),
-        detail: `WAVE ${this.wave} / ${this.score} PTS`,
-      };
+      return { stage: "survival", detail: `WAVE ${this.wave} / ${this.score} PTS` };
     }
     const objective = this.mission.objective;
     if (objective.kind === "eliminate") {
-      const total = getMissionEnemyTotal(this.mission);
-      const left = this.getEnemiesLeft();
-      return { progress: (total - left) / total, detail: `${left} HOSTILES REMAIN` };
+      return { stage: "eliminate", detail: `${this.getEnemiesLeft()} HOSTILES REMAIN` };
     }
-    if (objective.kind === "relays") {
-      const total = this.objectiveNodes.filter((node) => node.kind === "relay").length;
-      const left = this.objectiveNodes.filter((node) => node.kind === "relay" && node.active).length;
-      return { progress: total === 0 ? 1 : (total - left) / total, detail: `${left} RELAYS ACTIVE` };
+    if (objective.kind === "hold" || objective.kind === "survive") {
+      const elapsed = objective.kind === "hold" ? this.holdProgress : this.elapsed;
+      const remaining = Math.ceil(Math.max(0, objective.targetSeconds - elapsed));
+      return { stage: objective.kind, detail: `${remaining}s ${objective.kind === "hold" ? "TO LINK" : "REMAIN"}` };
     }
-    if (objective.kind === "hold") {
-      return {
-        progress: this.holdProgress / objective.targetSeconds,
-        detail: `${Math.ceil(objective.targetSeconds - this.holdProgress)}s TO LINK`,
-      };
+    const relays = this.objectiveNodes.filter((node) => node.kind === "relay" && node.active).length;
+    if (objective.kind === "relays") return { stage: "relays", detail: `${relays} RELAYS ACTIVE` };
+    if (relays > 0) return { stage: "shields", detail: `${relays} SHIELDS ACTIVE` };
+    if (this.enemies.some((enemy) => enemy.kind === "boss" && enemy.alive)) {
+      return { stage: "boss", detail: "DESTROY OMEGA" };
     }
-    if (objective.kind === "survive") {
-      return {
-        progress: this.elapsed / objective.targetSeconds,
-        detail: `${Math.ceil(Math.max(0, objective.targetSeconds - this.elapsed))}s REMAIN`,
-      };
-    }
-    const generators = this.objectiveNodes.filter((node) => node.kind === "relay" && node.active).length;
-    const boss = this.enemies.find((enemy) => enemy.kind === "boss" && enemy.alive);
-    if (generators > 0) return { progress: (2 - generators) / 4, detail: `${generators} SHIELDS ACTIVE` };
-    if (boss) return { progress: 0.5 + (1 - boss.hp / boss.maxHp) * 0.4, detail: "DESTROY OMEGA" };
-    return { progress: this.holdProgress > 0 ? 1 : 0.95, detail: "ENTER EXTRACTION" };
+    return { stage: "extract", detail: "ENTER EXTRACTION" };
   }
 
   private isBonusComplete(): boolean {
@@ -2067,12 +2042,7 @@ export class TankGame {
     if (owner === "player") {
       for (const enemy of this.enemies) {
         if (!enemy.alive || distanceSquared(enemy, { x, y }) >= radius * radius) continue;
-        if (
-          enemy.kind === "boss"
-          && this.objectiveNodes.some((node) => node.kind === "relay" && node.active)
-        ) continue;
-        enemy.hp -= 2;
-        if (enemy.hp <= 0) this.destroyEnemy(enemy, 120);
+        this.damageEnemy(enemy, 2, { x, y }, 120);
       }
     }
   }
@@ -2261,7 +2231,6 @@ export class TankGame {
   private updateTankVisualStates(delta: number): void {
     for (let tankIndex = -1; tankIndex < this.enemies.length; tankIndex += 1) {
       const tank = tankIndex < 0 ? this.player : this.enemies[tankIndex];
-      tank.stunned = Math.max(0, tank.stunned - delta);
       tank.recoilTime = Math.max(0, tank.recoilTime - delta);
       tank.chassisKick = Math.max(0, tank.chassisKick - delta * 14);
       tank.damageFlash = Math.max(0, tank.damageFlash - delta);
@@ -2307,6 +2276,8 @@ export class TankGame {
   }
 
   private updateParticles(delta: number): void {
+    const smokeDamping = Math.exp(-1.35 * delta);
+    const otherDamping = Math.exp(-4.5 * delta);
     let remainingCount = 0;
     for (const particle of this.particles) {
       particle.life -= delta;
@@ -2315,7 +2286,7 @@ export class TankGame {
       particle.y += particle.velocityY * delta;
       if (particle.kind === "smoke") particle.size += delta * 7;
       if (particle.kind === "ring") particle.size += delta * 58;
-      const damping = Math.exp(-(particle.kind === "smoke" ? 1.35 : 4.5) * delta);
+      const damping = particle.kind === "smoke" ? smokeDamping : otherDamping;
       particle.velocityX *= damping;
       particle.velocityY *= damping;
       this.particles[remainingCount] = particle;
@@ -2470,7 +2441,12 @@ export class TankGame {
 
   private setPhase(phase: GamePhase, force = false): void {
     if (this.phase === phase && !force) return;
-    if (phase !== "playing") this.shake = 0;
+    if (phase !== "playing") {
+      this.shake = 0;
+      this.keys.clear();
+      this.primaryFireHeld = false;
+      this.audio.engine(null);
+    }
     this.phase = phase;
     this.publishSnapshot();
   }
@@ -2480,7 +2456,7 @@ export class TankGame {
     const totalEnemies = getMissionEnemyTotal(this.mission);
     const activeEnemies = this.countActiveEnemies();
     const enemiesLeft = this.getEnemiesLeft(activeEnemies);
-    const objective = this.getObjectiveProgress();
+    const objective = this.getObjectiveStatus();
     const tankDefinition = PLAYER_TANKS[this.playerTank];
     this.onSnapshot({
       phase: this.phase,
@@ -2491,7 +2467,6 @@ export class TankGame {
       enemiesLeft,
       activeEnemies,
       totalEnemies,
-      completionPercent: Math.round(clamp(objective.progress, 0, 1) * 100),
       elapsed: this.elapsed,
       shots: this.shots,
       hits: this.hits,
@@ -2506,7 +2481,7 @@ export class TankGame {
         : null,
       activePowerUps: getActivePowerUpSnapshots(this.activePowerUps),
       objectiveLabel: this.mode === "survival" ? "ENDLESS SURVIVAL" : this.mission.objective.label,
-      objectiveProgress: clamp(objective.progress, 0, 1),
+      objectiveStage: objective.stage,
       objectiveDetail: objective.detail,
       bonusLabel: this.mission.bonus.label,
       bonusComplete: this.isBonusComplete(),
