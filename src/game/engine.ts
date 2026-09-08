@@ -999,10 +999,7 @@ export class TankGame {
     const length = Math.hypot(movementX, movementY);
     this.audio.engine(Math.min(1, length));
     if (length > 0) {
-      movementX /= length;
-      movementY /= length;
       const angle = Math.atan2(movementY, movementX);
-      this.player.hullAngle = turnTowards(this.player.hullAngle, angle, delta * 9);
       const inMud = this.hazards.some((hazard) => (
         hazard.active
           && hazard.kind === "mud"
@@ -1012,7 +1009,7 @@ export class TankGame {
         * PLAYER_TANKS[this.playerTank].speed
         * getPlayerSpeedMultiplier(this.activePowerUps)
         * (inMud ? 0.58 : 1);
-      this.moveTank(this.player, movementX * speed * delta, movementY * speed * delta);
+      this.driveTank(this.player, angle, speed, 4.8, delta);
       this.updateTankTracks(this.player, delta, this.getTrackColor("player"), 0.09);
     }
     if (this.pointerClient) {
@@ -1060,12 +1057,7 @@ export class TankGame {
       });
 
       if (behavior.speed > 0) {
-        enemy.hullAngle = turnTowards(enemy.hullAngle, moveAngle, delta * 3.8);
-        this.moveTank(
-          enemy,
-          Math.cos(moveAngle) * behavior.speed * delta,
-          Math.sin(moveAngle) * behavior.speed * delta,
-        );
+        this.driveTank(enemy, moveAngle, behavior.speed, 3.8, delta);
         this.updateTankTracks(enemy, delta, this.getTrackColor("enemy"), 0.14);
       }
 
@@ -1175,6 +1167,18 @@ export class TankGame {
     if (this.wave >= 3) available.push("minelayer", "support");
     if (this.wave >= 4) available.push("artillery");
     return available[Math.floor(this.survivalRandom() * available.length)] ?? "scout";
+  }
+
+  private driveTank(tank: Tank, targetAngle: number, speed: number, turnSpeed: number, delta: number): void {
+    // Choose the shorter hull turn; perpendicular requests consistently favor forward.
+    const reversing = Math.abs(normalizeAngle(targetAngle - tank.hullAngle)) > Math.PI / 2 + 1e-6;
+    const hullTarget = targetAngle + (reversing ? Math.PI : 0);
+    tank.hullAngle = normalizeAngle(turnTowards(tank.hullAngle, hullTarget, turnSpeed * delta));
+    // Tight turns begin as a pivot, then feed in drive as the tracks line up.
+    // No coasting: releasing movement still stops immediately for precise control.
+    const alignment = Math.max(0, Math.cos(hullTarget - tank.hullAngle));
+    const distance = speed * alignment * alignment * (reversing ? -0.8 : 1) * delta;
+    this.moveTank(tank, Math.cos(tank.hullAngle) * distance, Math.sin(tank.hullAngle) * distance);
   }
 
   private moveTank(tank: Tank, amountX: number, amountY: number): void {
@@ -1357,13 +1361,11 @@ export class TankGame {
     if (this.keys.has("s") || this.keys.has("arrowdown")) dy += 1;
     if (this.keys.has("a") || this.keys.has("arrowleft")) dx -= 1;
     if (this.keys.has("d") || this.keys.has("arrowright")) dx += 1;
-    if (dx === 0 && dy === 0) {
-      dx = Math.cos(this.player.hullAngle);
-      dy = Math.sin(this.player.hullAngle);
-    }
-    const length = Math.hypot(dx, dy);
-    dx /= length;
-    dy /= length;
+    const forwardX = Math.cos(this.player.hullAngle);
+    const forwardY = Math.sin(this.player.hullAngle);
+    const direction = dx * forwardX + dy * forwardY < -1e-6 ? -1 : 1;
+    dx = forwardX * direction;
+    dy = forwardY * direction;
     this.player.dashCooldown = PLAYER_TANKS[this.playerTank].abilityCooldown;
     this.player.invulnerable = Math.max(this.player.invulnerable, 0.28);
     for (let step = 0; step < 8; step += 1) this.moveTank(this.player, dx * 9, dy * 9);

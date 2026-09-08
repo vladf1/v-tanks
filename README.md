@@ -18,6 +18,11 @@ mission medals, daily seeded survival, synthesized sound, and high-DPI rendering
 - Escape — pause
 - `R` — restart the current mission
 
+Movement keys choose a world direction. The hull turns gradually and slows through
+tight turns; directions behind the hull engage reverse at 80% speed. Release the
+keys to stop immediately. Mouse aim stays independent, and the Raptor's dash follows
+the hull forward or backward.
+
 ## Development
 
 ```bash

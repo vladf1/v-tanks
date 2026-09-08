@@ -125,7 +125,7 @@ export function getCannonStats(kind: CannonKind): {
   bounces: number;
   speed: number;
 } {
-  if (kind === "rapid") return { reload: 0.19, damage: 1, bounces: 0, speed: 570 };
+  if (kind === "rapid") return { reload: 0.30, damage: 1, bounces: 0, speed: 570 };
   if (kind === "heavy") return { reload: 0.62, damage: 2, bounces: 0, speed: 470 };
   return { reload: 0.34, damage: 1, bounces: 2, speed: 535 };
 }
